@@ -253,8 +253,8 @@ curl http://localhost:3001/leads
 - [x] Basic backend API
 - [x] Simple lead form
 - [x] In-memory storage
-- [ ] Lead dashboard view
-- [ ] Basic email notifications
+- [x] Lead dashboard view
+- [x] Basic email notifications
 
 ### Phase 2: Core Features
 - [ ] Database integration (PostgreSQL)
