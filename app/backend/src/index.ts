@@ -206,12 +206,66 @@ function extractServices(description: string, name: string): string[] {
 
 // Helper: Calculate SEO audit score
 function calculateSeoScore(scraped: any): number {
-  let score = 50;
+  // Base heuristic: title/description/contact/https
+  let score = 40;
   if (scraped.title) score += 15;
   if (scraped.description) score += 15;
-  if (scraped.url && scraped.url.includes('https')) score += 10;
+  if (scraped.url && typeof scraped.url === 'string' && scraped.url.includes('https')) score += 10;
   if (scraped.phone || scraped.email) score += 10;
+
+  // Incorporate PageSpeed / Lighthouse metrics when available
+  // performance (0-1) -> up to +20
+  if (scraped.pageSpeed && typeof scraped.pageSpeed.performance === 'number') {
+    const p = Math.round(scraped.pageSpeed.performance * 20);
+    score += p;
+  }
+
+  // lighthouse SEO category (0-1) -> up to +10
+  if (scraped.pageSpeed && typeof scraped.pageSpeed.seo === 'number') {
+    const s = Math.round(scraped.pageSpeed.seo * 10);
+    score += s;
+  }
+
   return Math.min(100, score);
+}
+
+// Fetch PageSpeed Insights (Lighthouse) data via Google API
+async function fetchPageSpeedData(url: string): Promise<any> {
+  try {
+    const apiKey = process.env.PAGESPEED_API_KEY || '';
+    const endpoint = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
+    const params: any = { url, strategy: 'mobile' };
+    if (apiKey) params.key = apiKey;
+
+    const resp = await axios.get(endpoint, { params, timeout: 20000 });
+    const data = resp.data;
+
+    // Extract a few useful metrics
+    const lighthouse = data.lighthouseResult || {};
+    const categories = lighthouse.categories || {};
+    const audits = lighthouse.audits || {};
+
+    const performance = (categories.performance && categories.performance.score) || null;
+    const seo = (categories.seo && categories.seo.score) || null;
+    const accessibility = (categories.accessibility && categories.accessibility.score) || null;
+
+    const fcp = audits['first-contentful-paint']?.numericValue || null;
+    const lcp = audits['largest-contentful-paint']?.numericValue || null;
+    const cls = audits['cumulative-layout-shift']?.numericValue || null;
+
+    return {
+      raw: data,
+      performance,
+      seo,
+      accessibility,
+      fcp,
+      lcp,
+      cls,
+    };
+  } catch (err) {
+    logger.warn('PageSpeed fetch failed', { error: err?.toString?.() || err });
+    return null;
+  }
 }
 
 // Helper: Calculate brand audit score
@@ -522,6 +576,14 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
     if (url) {
       const scrapeResult = await scrapeWebsite(url);
       scrapedData = scrapeResult;
+      // Attach the URL for scoring/https check
+      scrapedData.url = url;
+
+      // Fetch PageSpeed / Lighthouse data and attach if available
+      const pageSpeed = await fetchPageSpeedData(url);
+      if (pageSpeed) {
+        scrapedData.pageSpeed = pageSpeed;
+      }
     }
 
     // Scrape Instagram if provided
@@ -544,7 +606,10 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
       overallScore: 0,
       recommendations: generateAuditRecommendations(businessIntelligence),
     };
-    auditScores.overallScore = Math.round((auditScores.seoScore + auditScores.brandScore + auditScores.leadCaptureScore) / 3);
+    // Weighted overall score: SEO 50%, Brand 30%, Lead Capture 20%
+    auditScores.overallScore = Math.round(
+      auditScores.seoScore * 0.5 + auditScores.brandScore * 0.3 + auditScores.leadCaptureScore * 0.2
+    );
 
     res.json({
       audit: auditScores,
