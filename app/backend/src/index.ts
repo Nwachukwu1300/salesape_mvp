@@ -232,7 +232,7 @@ function calculateSeoScore(scraped: any): number {
 // Fetch PageSpeed Insights (Lighthouse) data via Google API
 async function fetchPageSpeedData(url: string): Promise<any> {
   try {
-    const apiKey = process.env.PAGESPEED_API_KEY || '';
+    const apiKey = process.env.GOOGLE_PAGESPEED_API_KEY || process.env.PAGESPEED_API_KEY || '';
     const endpoint = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
     const params: any = { url, strategy: 'mobile' };
     if (apiKey) params.key = apiKey;
