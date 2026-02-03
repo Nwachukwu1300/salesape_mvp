@@ -1,6 +1,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import ClientDate from './ClientDate';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
 
 interface TimeSlot {
   date: string;
@@ -72,6 +76,7 @@ export default function BookingCalendar({ businessId, businessName }: BookingCal
       const newBooking = await response.json();
       setBookings([...bookings, newBooking]);
       setStatus('success');
+      toast.success('Booking confirmed');
       setTimeout(() => {
         setStatus('idle');
         setShowForm(false);
@@ -81,6 +86,7 @@ export default function BookingCalendar({ businessId, businessName }: BookingCal
       }, 2000);
     } catch (err) {
       setStatus('error');
+      toast.error('Failed to create booking');
     }
   };
 
@@ -101,22 +107,16 @@ export default function BookingCalendar({ businessId, businessName }: BookingCal
       const isPast = new Date(dateStr) < new Date(new Date().setHours(0, 0, 0, 0));
 
       days.push(
-        <button
+        <Button
           key={day}
+          size="sm"
           onClick={() => !isPast && setSelectedDate(dateStr)}
           disabled={isPast}
-          className={`p-2 rounded text-sm font-semibold ${
-            isPast
-              ? 'text-zinc-300 cursor-not-allowed'
-              : selectedDate === dateStr
-              ? 'bg-blue-600 text-white'
-              : isToday
-              ? 'bg-blue-100 text-blue-900'
-              : 'bg-zinc-100 text-zinc-900 hover:bg-zinc-200'
-          }`}
+          variant={selectedDate === dateStr ? 'default' : isToday ? 'ghost' : 'ghost'}
+          className={`p-2 text-sm font-semibold ${isPast ? 'text-zinc-300 cursor-not-allowed' : ''}`}
         >
           {day}
-        </button>
+        </Button>
       );
     }
 
@@ -130,23 +130,17 @@ export default function BookingCalendar({ businessId, businessName }: BookingCal
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Calendar */}
         <div>
-          <div className="flex justify-between items-center mb-4">
-            <button
-              onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}
-              className="text-blue-600 font-semibold hover:underline"
-            >
-              ← Prev
-            </button>
-            <h4 className="font-semibold text-zinc-900">
-              {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-            </h4>
-            <button
-              onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}
-              className="text-blue-600 font-semibold hover:underline"
-            >
-              Next →
-            </button>
-          </div>
+              <div className="flex justify-between items-center mb-4">
+                <Button variant="ghost" size="sm" onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}>
+                  ← Prev
+                </Button>
+                <h4 className="font-semibold text-zinc-900">
+                  {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                </h4>
+                <Button variant="ghost" size="sm" onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}>
+                  Next →
+                </Button>
+              </div>
 
           {/* Day headers */}
           <div className="grid grid-cols-7 gap-2 mb-2">
@@ -158,7 +152,7 @@ export default function BookingCalendar({ businessId, businessName }: BookingCal
           </div>
 
           {/* Calendar days */}
-          <div className="grid grid-cols-7 gap-2">{renderCalendar()}</div>
+              <div className="grid grid-cols-7 gap-2">{renderCalendar()}</div>
         </div>
 
         {/* Time slots & Form */}
@@ -166,53 +160,45 @@ export default function BookingCalendar({ businessId, businessName }: BookingCal
           {selectedDate && (
             <>
               <p className="text-sm font-semibold text-zinc-900 mb-4">
-                Selected: {new Date(selectedDate).toLocaleDateString()}
+                Selected: <ClientDate value={selectedDate} />
               </p>
 
               <div className="mb-6">
                 <p className="text-sm font-semibold text-zinc-900 mb-3">Available Times</p>
                 <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto">
                   {timeSlots.map(time => (
-                    <button
+                    <Button
                       key={time}
+                      size="sm"
+                      variant={selectedTime === time ? 'default' : 'ghost'}
                       onClick={() => setSelectedTime(time)}
-                      className={`p-2 rounded text-sm font-semibold ${
-                        selectedTime === time
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-zinc-100 text-zinc-900 hover:bg-zinc-200'
-                      }`}
+                      className={selectedTime === time ? 'p-2' : 'p-2'}
                     >
                       {time}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
 
               {selectedTime && (
                 <form onSubmit={handleBooking} className="space-y-4">
-                  <input
+                  <Input
                     type="text"
                     placeholder="Your Name"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
-                    className="w-full px-3 py-2 border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <input
+                  <Input
                     type="email"
                     placeholder="Your Email"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     required
-                    className="w-full px-3 py-2 border border-zinc-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <button
-                    type="submit"
-                    disabled={status === 'loading'}
-                    className="w-full bg-blue-600 text-white py-2 rounded font-semibold hover:bg-blue-700 disabled:opacity-50"
-                  >
+                  <Button type="submit" className="w-full" size="lg" disabled={status === 'loading'}>
                     {status === 'loading' ? 'Booking...' : 'Confirm Booking'}
-                  </button>
+                  </Button>
                   {status === 'success' && (
                     <div className="p-3 bg-green-50 text-green-700 text-sm rounded text-center">
                       ✓ Booking confirmed!

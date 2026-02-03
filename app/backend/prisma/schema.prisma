@@ -9,15 +9,198 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  password  String
+  name      String
+  businesses Business[]
+  teamMemberships TeamMember[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Business {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  url         String
+  description String?
+  logo        String?
+  publishedUrl String?
+  analysis    Json?
+  isPublished Boolean   @default(false)
+  publishedAt DateTime?
+  slug        String?   @unique
+  // Encrypted credentials for third-party integrations
+  googleCalendarTokens String?  // Encrypted JSON: {accessToken, refreshToken}
+  outlookCalendarTokens String?  // Encrypted JSON: {accessToken, refreshToken}
+  apiKeysEncrypted String?  // Encrypted JSON: {openai, other}
+  leads       Lead[]
+  bookings    Booking[]
+  availableSlots AvailableSlot[]
+  emailSequences EmailSequence[]
+  analytics   Analytics[]
+  abTests     ABTest[]
+  team        Team?
+  subscription Subscription?
+  payments    Payment[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model Lead {
   id        String    @id @default(cuid())
+  businessId String
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   name      String
   email     String
   company   String?
   message   String?
+  status    String    @default("new")  // new, contacted, converted, declined
+  source    String?   // web, instagram, direct
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Booking {
+  id        String    @id @default(cuid())
+  businessId String
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name      String
+  email     String
+  date      String
+  time      String
+  status    String    @default("confirmed")
+  createdAt DateTime  @default(now())
+
+  @@unique([businessId, date, time])
+}
+
+model AvailableSlot {
+  id        String    @id @default(cuid())
+  businessId String
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  dayOfWeek Int       // 0-6 (Sunday-Saturday)
+  startTime String    // HH:mm format
+  endTime   String    // HH:mm format
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model EmailSequence {
+  id        String    @id @default(cuid())
+  businessId String
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name      String    // "new_lead", "booking_reminder", etc.
+  subject   String
+  body      String    // HTML email body
+  delayMinutes Int   @default(0)  // delay before sending
+  triggerEvent String // "lead_created", "booking_created", "lead_contacted"
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Analytics {
+  id        String    @id @default(cuid())
+  businessId String
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  eventType String    // "lead_created", "booking_created", "website_viewed", "form_submitted"
+  eventData Json?
+  source    String?   // web, instagram, direct, sms
   createdAt DateTime  @default(now())
 }
+
+model Team {
+  id        String    @id @default(cuid())
+  businessId String    @unique
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name      String
+  members   TeamMember[]
+  leadRoutingRules LeadRoutingRule[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model TeamMember {
+  id        String    @id @default(cuid())
+  teamId    String
+  team      Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String    @default("member")  // admin, manager, member
+  email     String
+  status    String    @default("invited")  // invited, active
+  invitedAt DateTime  @default(now())
+  joinedAt  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([teamId, email])
+}
+
+model LeadRoutingRule {
+  id        String    @id @default(cuid())
+  teamId    String
+  team      Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  assignTo  String    // email of team member
+  service   String?   // specific service type (null = all services)
+  leadSource String?  // web, instagram, direct, sms (null = all sources)
+  priority  Int       @default(0)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Subscription {
+  id        String    @id @default(cuid())
+  businessId String    @unique
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  planId    String    // basic, pro, enterprise
+  status    String    @default("active")  // active, canceled, expired
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  currentPeriodStart DateTime
+  currentPeriodEnd DateTime
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Payment {
+  id        String    @id @default(cuid())
+  businessId String
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  stripePaymentId String?
+  amount    Int       // amount in cents
+  currency  String    @default("usd")
+  status    String    @default("pending")  // pending, succeeded, failed
+  description String?
+  invoiceUrl String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model ABTest {
+  id        String    @id @default(cuid())
+  businessId String
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name      String
+  variantA  Json      // {headline, cta, image, color}
+  variantB  Json      // {headline, cta, image, color}
+  status    String    @default("running")  // running, completed, paused
+  winner    String?   // a, b, or null if no winner
+  confidence Int      @default(0)  // 0-100
+  metricsA  Json?     // {views, clicks, conversions, ctr, conversionRate}
+  metricsB  Json?     // {views, clicks, conversions, ctr, conversionRate}
+  startDate DateTime  @default(now())
+  endDate   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+

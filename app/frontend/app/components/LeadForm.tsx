@@ -1,6 +1,10 @@
 'use client';
 
 import React, { useState, FormEvent, useEffect } from 'react';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 interface LeadData {
   name: string;
@@ -50,9 +54,11 @@ export default function LeadForm() {
 
       setStatus('success');
       setFormData({ name: '', email: '', company: '', message: '' });
+      toast.success("Lead submitted — we'll follow up soon.");
     } catch (error) {
       setStatus('error');
       setErrorMessage(error instanceof Error ? error.message : 'Something went wrong');
+      toast.error(error instanceof Error ? error.message : 'Failed to submit lead');
     }
   };
 
@@ -70,14 +76,13 @@ export default function LeadForm() {
           <label htmlFor="name" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
             Name *
           </label>
-          <input
+          <Input
             type="text"
             id="name"
             placeholder="John Doe"
             required
             value={formData.name}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, name: e.target.value })}
-            className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
           />
         </div>
 
@@ -85,14 +90,13 @@ export default function LeadForm() {
           <label htmlFor="email" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
             Email *
           </label>
-          <input
+          <Input
             type="email"
             id="email"
             placeholder="john@example.com"
             required
             value={formData.email}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, email: e.target.value })}
-            className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
           />
         </div>
 
@@ -100,13 +104,12 @@ export default function LeadForm() {
           <label htmlFor="company" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
             Company (optional)
           </label>
-          <input
+          <Input
             type="text"
             id="company"
             placeholder="Acme Inc"
             value={formData.company}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, company: e.target.value })}
-            className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
           />
         </div>
 
@@ -114,23 +117,18 @@ export default function LeadForm() {
           <label htmlFor="message" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
             Message (optional)
           </label>
-          <textarea
+          <Textarea
             id="message"
             placeholder="Tell us more about your inquiry..."
             rows={3}
             value={formData.message}
             onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setFormData({ ...formData, message: e.target.value })}
-            className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 resize-none"
           />
         </div>
 
-        <button
-          type="submit"
-          disabled={status === 'loading'}
-          className="w-full py-3 px-4 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-lg font-medium hover:bg-zinc-800 dark:hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
+        <Button type="submit" className="w-full" size="lg" disabled={status === 'loading'}>
           {status === 'loading' ? 'Submitting...' : 'Submit Lead'}
-        </button>
+        </Button>
 
         {status === 'success' && (
           <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 text-sm">

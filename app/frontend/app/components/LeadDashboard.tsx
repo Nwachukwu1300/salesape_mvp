@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import ClientDateTime from './ClientDateTime';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface Lead {
   id: string;
@@ -39,7 +41,16 @@ export default function LeadDashboard() {
   };
 
   if (loading) {
-    return <div className="text-center py-8 text-zinc-600 dark:text-zinc-400">Loading leads...</div>;
+    return (
+      <div className="w-full">
+        <h2 className="text-2xl font-bold mb-6 text-zinc-900 dark:text-zinc-50">Lead Dashboard</h2>
+        <div className="space-y-4">
+          <Skeleton className="h-28" />
+          <Skeleton className="h-28" />
+          <Skeleton className="h-28" />
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -63,7 +74,7 @@ export default function LeadDashboard() {
           {leads.map((lead) => (
             <div
               key={lead.id}
-              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-6 hover:shadow-md transition-shadow"
+              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-6 enter-up hover-raise"
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -100,7 +111,7 @@ export default function LeadDashboard() {
 
               <div className="mt-4 flex justify-between items-center">
                 <span className="text-xs text-zinc-500 dark:text-zinc-500">
-                  {new Date(lead.createdAt).toLocaleDateString()} {new Date(lead.createdAt).toLocaleTimeString()}
+                  <ClientDateTime value={lead.createdAt} />
                 </span>
               </div>
             </div>

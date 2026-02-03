@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
+import ClientDate from '../../components/ClientDate';
 
 interface Business {
   id: string;
@@ -123,7 +124,7 @@ export default function BusinessDashboard() {
                       {lead.company && <p className="text-zinc-600 text-sm">Company: {lead.company}</p>}
                     </div>
                     <span className="text-xs text-zinc-500">
-                      {new Date(lead.createdAt).toLocaleDateString()}
+                      <ClientDate value={lead.createdAt} />
                     </span>
                   </div>
                   {lead.message && (

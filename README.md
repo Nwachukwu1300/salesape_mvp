@@ -38,7 +38,7 @@ Voice or chat input builds and runs a business end-to-end with full automation.
 
 ## Tech Stack
 
-**Backend (Your Focus)**
+**Backend (Both Parties Focus)**
 - Node.js with Express 5.2.1
 - TypeScript
 - tsx for development
@@ -200,19 +200,45 @@ curl http://localhost:3001/leads
 
 ## Current Features
 
-**MVP v0.1 (Current)**
-- Basic lead capture form
-- Lead storage (in-memory)
-- Simple API for lead management
+**MVP v0.3 (Current - Phase 4 Complete)**
+- Complete onboarding flow with URL/Instagram input
+- Web scraping of business information from URLs
+- AI-powered business analysis
+- Multiple website template selection
+- Custom branding (colors, fonts, logos)
+- Voice and chat input for business description
+- User authentication with JWT
+- Lead capture form
+- Lead storage with Prisma ORM
+- Booking calendar backend
+- **Team collaboration** (invite members, manage roles)
+- **Advanced lead routing** (auto-assign by service/source)
+- **Payment integration** (subscription plans: Basic/Pro/Enterprise)
 - Health check endpoint
 - CORS enabled for local development
 
-**Limitations**
-- Data resets on server restart (in-memory only)
-- No database persistence
-- No authentication
-- No email notifications yet
-- Single static form (no dynamic generation)
+**Phase 4 Highlights - Now Complete!**
+- 🎤 **Voice Input**: Use Web Speech API to describe your business by voice
+- 💬 **Chat Input**: Text-based description with real-time form updates
+- 🎨 **Custom Branding**: 
+  - Primary and secondary color pickers
+  - Font family selector (sans-serif, serif, monospace)
+  - Custom logo URL upload
+- 📋 **Template Selection**: Choose from multiple pre-built website templates with visual preview
+- 👥 **Team Collaboration**: 
+  - Invite team members with different roles (admin, manager, member)
+  - Track invitation status and team member activity
+  - Email invitations for seamless onboarding
+- 🔀 **Advanced Lead Routing**: 
+  - Automatically assign leads to team members
+  - Route by service type or lead source
+  - Priority-based rule ordering
+  - Enable/disable rules dynamically
+- 💳 **Payment Integration**: 
+  - Three-tier subscription plans (Basic $29/mo, Pro $99/mo, Enterprise $299/mo)
+  - Simulated payment processing (Stripe-ready)
+  - Payment history and invoice tracking
+  - Automatic plan upgrades
 
 ---
 
@@ -257,29 +283,30 @@ curl http://localhost:3001/leads
 - [x] Basic email notifications
 
 ### Phase 2: Core Features
-- [ ] Database integration (PostgreSQL)
-- [ ] Instagram URL parsing
-- [ ] Website URL scraping
-- [ ] Business understanding (AI/NLP)
-- [ ] Website template generation
-- [ ] Booking calendar backend
-- [ ] User authentication
+ - [x] Database integration (PostgreSQL/SQLite)
+ - [x] Instagram URL parsing
+ - [x] Website URL scraping
+ - [x] Business understanding (AI/NLP)
+ - [x] Website template generation
+ - [x] Booking calendar backend
+ - [x] User authentication
 
 ### Phase 3: Automation
-- [ ] Automated website publishing
-- [ ] Lead status automation
-- [ ] Email sequences
-- [ ] Calendar integration (Google/Outlook)
-- [ ] SMS notifications
-- [ ] Analytics tracking
+ - [x] Automated website publishing
+ - [x] Lead status automation
+ - [x] Email sequences
+ - [x] Calendar integration (Google/Outlook)
+ - [x] SMS notifications
+ - [x] Analytics tracking
+
 
 ### Phase 4: Scale
-- [ ] Multiple website templates
-- [ ] Custom branding options
-- [ ] Advanced lead routing
-- [ ] Team collaboration features
-- [ ] Payment integration
-- [ ] Voice/chat business setup
+- [x] Multiple website templates
+- [x] Custom branding options
+- [x] Voice/chat business setup
+- [x] Advanced lead routing
+- [x] Team collaboration features
+- [x] Payment integration
 
 ---
 
