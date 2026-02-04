@@ -187,6 +187,8 @@ type OnboardingData = {
 export default function BusinessOnboarding() {
   const [templates, setTemplates] = useState<any[]>([]);
   const [recommendedTemplateId, setRecommendedTemplateId] = useState<string>('');
+  const [templatesLoading, setTemplatesLoading] = useState<boolean>(false);
+  const [templatesError, setTemplatesError] = useState<string>('');
   const [formData, setFormData] = useState<OnboardingData>({
     url: '',
     businessName: '',
@@ -297,16 +299,37 @@ export default function BusinessOnboarding() {
   };
 
   const fetchTemplates = async (businessId: string) => {
+    setTemplatesLoading(true);
+    setTemplatesError('');
     try {
       const res = await apiFetch(`/businesses/${businessId}/template`);
-      if (!res.ok) throw new Error('Failed to fetch templates');
-      const data = await res.json();
+      if (!res.ok) {
+        const text = await res.text().catch(() => 'Failed to fetch templates');
+        throw new Error(text || `Failed to fetch templates (${res.status})`);
+      }
+      const raw = await res.text();
+      console.log('Raw templates response text:', raw);
+      let data: any = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (parseErr) {
+        console.warn('Failed to parse templates JSON, falling back to empty object', parseErr);
+        data = {};
+      }
+      console.log('Templates response:', data);
       setTemplates(data.templates || []);
       setRecommendedTemplateId(data.recommended?.id || '');
       setFormData((prev) => ({ ...prev, selectedTemplateId: data.recommended?.id || '' }));
-    } catch {
+      return true;
+    } catch (err: any) {
+      console.error('Failed to fetch templates:', err);
       setTemplates([]);
       setRecommendedTemplateId('');
+      setTemplatesError(err?.message || 'Failed to fetch templates');
+      setErrorMessage(err?.message || 'Failed to fetch templates');
+      return false;
+    } finally {
+      setTemplatesLoading(false);
     }
   };
 
@@ -336,10 +359,21 @@ export default function BusinessOnboarding() {
       }
 
       const business = await response.json();
-      setStatus('success');
-      toast.success('Business created');
       setFormData((prev) => ({ ...prev, businessId: business.id }));
-      await fetchTemplates(business.id);
+      toast.success('Business created! Loading templates...');
+      console.log('Business created:', business);
+      
+      // Fetch templates and wait for them to load before showing success state
+      console.log('Fetching templates for businessId:', business.id);
+      const templatesLoaded = await fetchTemplates(business.id);
+      console.log('Templates loaded:', templatesLoaded);
+      
+      if (templatesLoaded) {
+        setStatus('success');
+      } else {
+        setStatus('error');
+        setErrorMessage('Failed to load templates. Please try again.');
+      }
     } catch (error) {
       setStatus('error');
       toast.error(error instanceof Error ? error.message : 'Something went wrong');
@@ -375,9 +409,33 @@ export default function BusinessOnboarding() {
     }));
   };
 
-  const handleFinalize = () => {
+  const handleFinalize = async () => {
     if (formData.businessId && formData.selectedTemplateId) {
-      router.push(`/${formData.businessId}/website?template=${formData.selectedTemplateId}`);
+      setStatus('loading');
+      try {
+        // Publish the website to generate a shareable URL
+        const publishRes = await apiFetch(`/businesses/${formData.businessId}/publish`, {
+          method: 'POST',
+          body: JSON.stringify({ templateId: formData.selectedTemplateId }),
+        });
+        
+        if (!publishRes.ok) {
+          throw new Error('Failed to publish website');
+        }
+        
+        const publishedData = await publishRes.json();
+        toast.success('Website published successfully!');
+        setStatus('success');
+        
+        // Navigate to the website preview page
+        setTimeout(() => {
+          router.push(`/${formData.businessId}/website?template=${formData.selectedTemplateId}`);
+        }, 1000);
+      } catch (error) {
+        setStatus('error');
+        toast.error(error instanceof Error ? error.message : 'Failed to publish website');
+        setErrorMessage(error instanceof Error ? error.message : 'Failed to publish website');
+      }
     }
   };
 
@@ -412,7 +470,7 @@ export default function BusinessOnboarding() {
             <AuthForm onSuccess={() => setIsAuthenticated(true)} />
           )}
 
-          {isAuthenticated && (
+          {isAuthenticated && !formData.businessId && (
             <div className="mb-6 flex gap-3 justify-center">
               <Button
                 type="button"
@@ -424,7 +482,9 @@ export default function BusinessOnboarding() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-8 space-y-6">
+          {/* Show form if business not created yet, or show templates if business was created */}
+          {!formData.businessId || status !== 'success' ? (
+            <form onSubmit={handleSubmit} className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-8 space-y-6">
         <div>
           <label htmlFor="url" className="block text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">
             Your Instagram Profile or Website URL *
@@ -511,29 +571,74 @@ export default function BusinessOnboarding() {
 
         <BrandingOptions branding={formData.branding} onChange={handleBrandingChange} />
 
-        {status === 'success' && templates.length > 0 && (
-          <>
-            <TemplateSelector 
-              templates={templates} 
-              selected={formData.selectedTemplateId || recommendedTemplateId} 
-              onSelect={handleTemplateSelect}
-            />
-            <Button variant="secondary" size="lg" className="w-full" onClick={handleFinalize}>
-              Create Website
-            </Button>
-          </>
-        )}
-
         {status !== 'success' && (
           <Button type="submit" className="w-full" size="lg" disabled={status === 'loading'}>
             {status === 'loading' ? 'Creating...' : 'Next'}
           </Button>
         )}
 
+        {status === 'loading' && formData.businessId && (
+          <div className="text-center py-6">
+            <p className="text-zinc-600 dark:text-zinc-400 mb-4">Loading templates...</p>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          </div>
+        )}
+
         {errorMessage && (
           <div className="text-red-600 dark:text-red-400 text-sm">{errorMessage}</div>
         )}
       </form>
+            ) : (
+              // Template Selection Screen
+              <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-8 space-y-6">
+                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 mb-4">
+                  <h3 className="font-semibold text-green-800 dark:text-green-200 mb-2">✓ Website Created Successfully!</h3>
+                  <p className="text-sm text-green-700 dark:text-green-300 mb-2">{formData.businessName || 'Your Business'}</p>
+                  <p className="text-sm text-green-700 dark:text-green-300">Choose a template below to customize and launch your website</p>
+                </div>
+                
+                {templates.length > 0 ? (
+                  <>
+                    {templatesError && (
+                      <div className="text-red-600 dark:text-red-400 mb-4">
+                        {templatesError}
+                      </div>
+                    )}
+                    <TemplateSelector 
+                      templates={templates} 
+                      selected={formData.selectedTemplateId || recommendedTemplateId} 
+                      onSelect={handleTemplateSelect}
+                    />
+                    <Button 
+                      variant="default" 
+                      size="lg" 
+                      className="w-full" 
+                      onClick={handleFinalize}
+                      disabled={status === 'loading'}
+                    >
+                      {status === 'loading' ? 'Publishing Website...' : '🚀 Launch Website'}
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      size="lg" 
+                      className="w-full" 
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, businessId: undefined }));
+                        setStatus('idle');
+                        setTemplates([]);
+                      }}
+                    >
+                      ← Back to Edit
+                    </Button>
+                  </>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-zinc-600 dark:text-zinc-400 mb-4">Loading templates...</p>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                  </div>
+                )}
+              </div>
+            )}
         </>
       )}
     </div>

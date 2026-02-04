@@ -16,6 +16,9 @@ interface Business {
   url: string;
   description?: string;
   createdAt: string;
+  publishedUrl?: string;
+  isPublished?: boolean;
+  slug?: string;
 }
 
 interface Lead {
@@ -173,6 +176,38 @@ export default function GeneratedWebsite() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-zinc-900">
+      {/* Admin/Preview Banner */}
+      <div className="bg-blue-50 dark:bg-blue-900/30 border-b border-blue-200 dark:border-blue-800 px-4 py-3">
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-2 text-sm text-blue-800 dark:text-blue-200">
+            <span>✓ Website Published</span>
+            <span className="text-blue-600 dark:text-blue-300">•</span>
+            <span>{business?.name}</span>
+          </div>
+          <div className="flex gap-3">
+            <Button 
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                const url = business?.publishedUrl || `${window.location.origin}/${businessId}/website`;
+                navigator.clipboard.writeText(url);
+                toast.success('Shareable URL copied to clipboard!');
+              }}
+              className="text-blue-600 dark:text-blue-300"
+            >
+              📋 Copy Share Link
+            </Button>
+            <Button 
+              size="sm"
+              variant="ghost"
+              asChild
+              className="text-blue-600 dark:text-blue-300"
+            >
+              <a href={`/${businessId}/dashboard`}>📊 Dashboard</a>
+            </Button>
+          </div>
+        </div>
+      </div>
       {/* Hero Section */}
       <div 
         className="text-white py-24 px-4"

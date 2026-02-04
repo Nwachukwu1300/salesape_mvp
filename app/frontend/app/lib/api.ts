@@ -30,10 +30,34 @@ export async function apiFetch(
   options: RequestInit & { skipAuth?: boolean } = {}
 ): Promise<Response> {
   const { skipAuth = false, ...fetchOptions } = options;
-  return fetch(`${API_URL}${path}`, {
-    ...fetchOptions,
-    headers: { ...apiHeaders(!skipAuth), ...(fetchOptions.headers as object) },
-  });
+  // Normalize headers: support plain objects, Headers instances, or undefined
+  const baseHeaders = apiHeaders(!skipAuth);
+  let extraHeaders: Record<string, string> = {};
+  try {
+    if (fetchOptions.headers instanceof Headers) {
+      fetchOptions.headers.forEach((value, key) => {
+        extraHeaders[key] = value;
+      });
+    } else if (fetchOptions.headers && typeof fetchOptions.headers === 'object') {
+      // Cast to Record<string,string> safely
+      extraHeaders = Object.fromEntries(Object.entries(fetchOptions.headers as Record<string, any>).map(([k, v]) => [k, String(v)]));
+    }
+  } catch (e) {
+    // ignore header normalization errors
+    console.warn('apiFetch: failed to normalize headers', e);
+  }
+
+  const headers = { ...baseHeaders, ...extraHeaders } as HeadersInit;
+
+  try {
+    return await fetch(`${API_URL}${path}`, {
+      ...fetchOptions,
+      headers,
+    });
+  } catch (err) {
+    console.error('apiFetch network error:', err);
+    throw err;
+  }
 }
 
 export { API_URL };

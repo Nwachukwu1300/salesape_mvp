@@ -389,8 +389,11 @@ const sendAuthEmail = async (user: any, type: 'verify' | 'welcome' | 'login', ip
       subject,
       html,
     });
+    console.log(`[Email Sent] ${type} email to ${user.email}`);
+    logger.info(`Auth email sent`, { type, email: user.email });
   } catch (err) {
     logger.error('Auth email send error', { error: err });
+    console.error(`[Email Error] Failed to send ${type} email to ${user.email}:`, err);
   }
 };
 
@@ -554,11 +557,11 @@ app.post('/auth/login', authLimiter, authValidation.login, validationErrorHandle
     );
 
     logger.info('User login successful', { email });
-    // Send verification email on login for existing users
+    // Send login notification email
     try {
-      await sendAuthEmail(user, 'verify', req.ip as string);
+      await sendAuthEmail(user, 'login', req.ip as string);
     } catch (e) {
-      logger.warn('Failed to send verification email on login', { error: e });
+      logger.warn('Failed to send login notification email', { error: e });
     }
     res.json({
       token,
