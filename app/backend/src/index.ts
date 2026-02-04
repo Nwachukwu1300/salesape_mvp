@@ -345,6 +345,55 @@ const sendEmailNotification = async (lead: any, business: any) => {
   }
 };
 
+// Send authentication-related emails (verification, welcome, login alert)
+const sendAuthEmail = async (user: any, type: 'verify' | 'welcome' | 'login', ip?: string) => {
+  try {
+    if (process.env.EMAIL_ENABLED !== 'true') {
+      console.log(`[DEV] Auth email (${type}) suppressed for ${user.email}`);
+      return;
+    }
+
+    let subject = '';
+    let html = '';
+
+    if (type === 'verify') {
+      const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1d' });
+      const frontend = process.env.FRONTEND_URL || 'https://app.salesape.com';
+      const verifyLink = `${frontend.replace(/\/+$/,'')}/verify?token=${token}`;
+      subject = 'Welcome to SalesAPE — Verify your email';
+      html = `
+        <h2>Welcome, ${user.name || ''}!</h2>
+        <p>Thanks for creating an account. Please verify your email by clicking the link below:</p>
+        <p><a href="${verifyLink}">Verify email</a></p>
+        <p>This link expires in 24 hours.</p>
+      `;
+    } else if (type === 'welcome') {
+      subject = 'Welcome to SalesAPE';
+      html = `
+        <h2>Welcome, ${user.name || ''}!</h2>
+        <p>Thanks for joining SalesAPE. We\'re excited to have you on board.</p>
+      `;
+    } else if (type === 'login') {
+      subject = 'New sign-in to your SalesAPE account';
+      html = `
+        <h2>Sign-in detected</h2>
+        <p>Your account (${user.email}) signed in at ${new Date().toLocaleString()}.</p>
+        ${ip ? `<p>IP: ${ip}</p>` : ''}
+        <p>If this wasn't you, reset your password immediately.</p>
+      `;
+    }
+
+    await transporter.sendMail({
+      from: 'no-reply@salesape.com',
+      to: user.email,
+      subject,
+      html,
+    });
+  } catch (err) {
+    logger.error('Auth email send error', { error: err });
+  }
+};
+
 // Twilio SMS support
 const twilioClient = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
   ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
@@ -464,6 +513,12 @@ app.post('/auth/register', authLimiter, authValidation.register, validationError
     );
 
     logger.info('User registered', { userId: user.id, email: user.email });
+    // Send welcome email to new user
+    try {
+      await sendAuthEmail(user, 'welcome');
+    } catch (e) {
+      logger.warn('Failed to queue welcome email', { error: e });
+    }
     res.status(201).json({
       token,
       user: { id: user.id, email: user.email, name: user.name }
@@ -499,6 +554,12 @@ app.post('/auth/login', authLimiter, authValidation.login, validationErrorHandle
     );
 
     logger.info('User login successful', { email });
+    // Send verification email on login for existing users
+    try {
+      await sendAuthEmail(user, 'verify', req.ip as string);
+    } catch (e) {
+      logger.warn('Failed to send verification email on login', { error: e });
+    }
     res.json({
       token,
       user: { id: user.id, email: user.email, name: user.name }
