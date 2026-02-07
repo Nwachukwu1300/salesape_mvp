@@ -2,6 +2,7 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 import axios from 'axios';
@@ -22,6 +23,7 @@ import {
   instagramProfileToBusinessData,
   generateInstagramCaption 
 } from './utils/instagram-scraper.js';
+import { validateBusinessUnderstanding, deterministicStringifyBusiness } from './utils/business-understanding.js';
 import { 
   validationErrorHandler, 
   authValidation, 
@@ -312,6 +314,184 @@ function generateAuditRecommendations(intelligence: any): string[] {
   return recommendations;
 }
 
+// --- SEO Audit Endpoint (enforces per-user monthly quota) ---
+app.post('/seo-audit', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+
+    const userId = req.userId!;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+
+    // Check usage for this month (limit 2)
+    const usage = await prisma.auditUsage.findFirst({ where: { userId, year, month } });
+    if (usage && usage.count >= 2) {
+      return res.status(429).json({ error: 'Monthly audit limit reached (2 per month)' });
+    }
+
+    // Run scraping + PageSpeed
+    const scraped = await (async () => { try { return await scrapeWebsite(url); } catch { return {}; } })();
+    const pageSpeed = await fetchPageSpeedData(url);
+
+    const performance = pageSpeed?.performance ? Math.round(pageSpeed.performance * 100) : 0;
+    const seoScore = pageSpeed?.seo ? Math.round(pageSpeed.seo * 100) : 0;
+    const accessibility = pageSpeed?.accessibility ? Math.round(pageSpeed.accessibility * 100) : 0;
+
+    const bestPractices = calculateSeoScore({ pageSpeed });
+
+    // Issues/opportunities - simple extraction from audits
+    const issues = { critical: [], warnings: [], opportunities: [] } as any;
+    if (!scraped || Object.keys(scraped).length === 0) issues.warnings.push('Failed to scrape site content');
+    if (performance < 40) issues.critical.push('Low performance score');
+    if (seoScore < 50) issues.warnings.push('SEO score is low');
+
+    const recommendations = generateAuditRecommendations({ seoKeywords: scraped.headings || [], heroHeadline: scraped.title || '' });
+
+    const audit = await prisma.seoAudit.create({
+      data: {
+        userId,
+        businessId: null,
+        url,
+        performance,
+        seo: seoScore,
+        accessibility,
+        bestPractices,
+        issues: issues as any,
+        recommendations: recommendations as any,
+        raw: { pageSpeed, scraped },
+      }
+    });
+
+    // Increment/create usage
+    if (usage) {
+      await prisma.auditUsage.update({ where: { id: usage.id }, data: { count: usage.count + 1 } });
+    } else {
+      await prisma.auditUsage.create({ data: { userId, year, month, count: 1 } });
+    }
+
+    res.json({ audit });
+  } catch (err) {
+    logger.error('SEO audit error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to run SEO audit' });
+  }
+});
+
+// --- Google Calendar connect (store encrypted tokens) ---
+app.post('/businesses/:businessId/connect-google-calendar', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const { tokens } = req.body; // expect { accessToken, refreshToken }
+    if (!businessId) return res.status(400).json({ error: 'Business id required' });
+    if (!tokens || !tokens.accessToken) return res.status(400).json({ error: 'tokens required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business || business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const encrypted = encryptData(JSON.stringify(tokens));
+    await prisma.business.update({ where: { id: businessId }, data: { googleCalendarTokens: encrypted } });
+
+    res.json({ message: 'Google Calendar connected' });
+  } catch (err) {
+    logger.error('Connect calendar error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to connect calendar' });
+  }
+});
+
+// Helper: build OAuth2 client from stored tokens
+function buildOAuth2ClientFromTokens(tokensObj: any) {
+  const clientId = process.env.GOOGLE_CLIENT_ID || '';
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'urn:ietf:wg:oauth:2.0:oob';
+  const oAuth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+  oAuth2Client.setCredentials(tokensObj);
+  return oAuth2Client;
+}
+
+// GET availability (freebusy) for a business's primary calendar
+app.get('/businesses/:businessId/calendar/freebusy', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const { start, end } = req.query;
+    if (!businessId) return res.status(400).json({ error: 'Business id required' });
+    if (!start || !end) return res.status(400).json({ error: 'start and end query params required (ISO)' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    if (!business.googleCalendarTokens) return res.status(400).json({ error: 'No Google Calendar tokens connected' });
+
+    const decrypted = getDecryptedValue(business.googleCalendarTokens);
+    const tokens = JSON.parse(decrypted);
+    const oAuth2Client = buildOAuth2ClientFromTokens(tokens);
+    const calendar = google.calendar({ version: 'v3', auth: oAuth2Client });
+
+    const resp = await calendar.freebusy.query({
+      requestBody: {
+        timeMin: String(start),
+        timeMax: String(end),
+        items: [{ id: 'primary' }],
+      }
+    });
+
+    res.json({ freebusy: resp.data });
+  } catch (err) {
+    logger.error('Calendar freebusy error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch availability' });
+  }
+});
+
+// Create event in Google Calendar and persist as CalendarBooking
+app.post('/businesses/:businessId/calendar/events', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const { startTime, endTime, summary, description, attendees, leadId } = req.body;
+    if (!businessId) return res.status(400).json({ error: 'Business id required' });
+    if (!startTime || !endTime || !summary) return res.status(400).json({ error: 'startTime, endTime, summary required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    if (!business.googleCalendarTokens) return res.status(400).json({ error: 'No Google Calendar tokens connected' });
+
+    const decrypted = getDecryptedValue(business.googleCalendarTokens);
+    const tokens = JSON.parse(decrypted);
+    const oAuth2Client = buildOAuth2ClientFromTokens(tokens);
+    const calendar = google.calendar({ version: 'v3', auth: oAuth2Client });
+
+    const event: any = {
+      summary,
+      description,
+      start: { dateTime: new Date(startTime).toISOString() },
+      end: { dateTime: new Date(endTime).toISOString() },
+    };
+    if (Array.isArray(attendees) && attendees.length > 0) {
+      event.attendees = attendees.map((a: any) => ({ email: a.email }));
+    }
+
+    const created = await calendar.events.insert({ calendarId: 'primary', requestBody: event });
+
+    // Persist booking
+    const booking = await prisma.calendarBooking.create({
+      data: {
+        businessId,
+        leadId: leadId || null,
+        provider: 'google',
+        startTime: new Date(startTime),
+        endTime: new Date(endTime),
+      }
+    });
+
+    res.json({ event: created.data, booking });
+  } catch (err) {
+    logger.error('Create calendar event error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to create calendar event' });
+  }
+});
+
 // Email notification
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.mailtrap.io',
@@ -322,8 +502,37 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Initialize SendGrid if API key present
+if (process.env.SENDGRID_API_KEY) {
+  try {
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+    console.log('[Email] SendGrid initialized');
+  } catch (err) {
+    console.warn('[Email] Failed to initialize SendGrid', err);
+  }
+}
+
 const sendEmailNotification = async (lead: any, business: any) => {
   try {
+    // Prefer SendGrid when configured
+    if (process.env.SENDGRID_API_KEY) {
+      await sgMail.send({
+        to: process.env.ADMIN_EMAIL || 'admin@salesape.com',
+        from: 'leads@salesape.com',
+        subject: `New Lead for ${business.name}: ${lead.name}`,
+        html: `
+          <h2>New Lead Received</h2>
+          <p><strong>Business:</strong> ${business.name}</p>
+          <p><strong>Name:</strong> ${lead.name}</p>
+          <p><strong>Email:</strong> <a href="mailto:${lead.email}">${lead.email}</a></p>
+          ${lead.company ? `<p><strong>Company:</strong> ${lead.company}</p>` : ''}
+          ${lead.message ? `<p><strong>Message:</strong> ${lead.message}</p>` : ''}
+          <p><strong>Received:</strong> ${new Date(lead.createdAt).toLocaleString()}</p>
+        `,
+      });
+      return;
+    }
+
     if (process.env.EMAIL_ENABLED === 'true') {
       await transporter.sendMail({
         from: 'leads@salesape.com',
@@ -383,12 +592,21 @@ const sendAuthEmail = async (user: any, type: 'verify' | 'welcome' | 'login', ip
       `;
     }
 
-    await transporter.sendMail({
-      from: 'no-reply@salesape.com',
-      to: user.email,
-      subject,
-      html,
-    });
+    if (process.env.SENDGRID_API_KEY) {
+      await sgMail.send({
+        to: user.email,
+        from: 'no-reply@salesape.com',
+        subject,
+        html,
+      });
+    } else {
+      await transporter.sendMail({
+        from: 'no-reply@salesape.com',
+        to: user.email,
+        subject,
+        html,
+      });
+    }
     console.log(`[Email Sent] ${type} email to ${user.email}`);
     logger.info(`Auth email sent`, { type, email: user.email });
   } catch (err) {
@@ -843,6 +1061,43 @@ app.post('/businesses', authenticateToken, async (req: AuthRequest, res: Respons
       analysis = await analyzeBusiness(description || '', scraped);
     } catch {
       analysis = undefined;
+    }
+
+    // Ensure analysis contains a deterministic, validated BusinessUnderstanding
+    try {
+      if (analysis && typeof analysis === 'object') {
+        // allow analysis.businessUnderstanding or top-level
+        const bu = analysis.businessUnderstanding || analysis;
+        try {
+          validateBusinessUnderstanding(bu);
+        } catch (err) {
+          // Try to coerce minimal structure and re-validate
+          const inferred = {
+            businessName: name || (bu && bu.businessName) || 'My Business',
+            industry: (bu && bu.industry) || 'general',
+            services: (bu && bu.services) || [],
+            location: (bu && bu.location) || '',
+            brandTone: (bu && bu.brandTone) || 'friendly',
+            brandColors: (bu && bu.brandColors) || [],
+            logoUrl: (bu && bu.logoUrl) || undefined,
+            contactPreferences: (bu && bu.contactPreferences) || { email: true, phone: false, booking: true },
+            seoInsights: (bu && bu.seoInsights) || undefined,
+          };
+          validateBusinessUnderstanding(inferred);
+          analysis.businessUnderstanding = inferred;
+        }
+
+        // Store a canonical deterministic version as analysis.businessUnderstandingCanonical
+        try {
+          const canonical = deterministicStringifyBusiness(analysis.businessUnderstanding || bu);
+          analysis.businessUnderstandingCanonical = JSON.parse(canonical);
+        } catch (err) {
+          // swallow - not critical
+          logger.warn('Deterministic stringify failed', { error: String(err) });
+        }
+      }
+    } catch (err) {
+      logger.warn('BusinessUnderstanding validation error', { error: String(err) });
     }
 
     const userId = req.userId!;

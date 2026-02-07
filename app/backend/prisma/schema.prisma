@@ -9,8 +9,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -43,6 +43,7 @@ model Business {
   apiKeysEncrypted String?  // Encrypted JSON: {openai, other}
   leads       Lead[]
   bookings    Booking[]
+  calendarBookings CalendarBooking[]
   availableSlots AvailableSlot[]
   emailSequences EmailSequence[]
   analytics   Analytics[]
@@ -202,5 +203,42 @@ model ABTest {
   endDate   DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+}
+
+model SeoAudit {
+  id        String   @id @default(cuid())
+  userId    String?
+  businessId String?
+  url       String
+  performance Int
+  seo        Int
+  accessibility Int
+  bestPractices Int
+  issues     Json?
+  recommendations Json?
+  raw        Json?
+  createdAt  DateTime @default(now())
+}
+
+model AuditUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  year      Int
+  month     Int
+  count     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, year, month])
+}
+
+model CalendarBooking {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  leadId     String?
+  provider   String   // google | calendly
+  startTime  DateTime
+  endTime    DateTime
+  createdAt  DateTime @default(now())
 }
 
