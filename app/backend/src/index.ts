@@ -418,8 +418,8 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: `secret=${encodeURIComponent(recaptchaSecret)}&response=${encodeURIComponent(captchaToken)}`,
         });
-        const verifyJson = await verifyRes.json();
-        if (!verifyJson.success) return res.status(403).json({ error: 'Captcha verification failed' });
+        const verifyJson = await verifyRes.json() as any;
+        if (!verifyJson || !verifyJson.success) return res.status(403).json({ error: 'Captcha verification failed' });
       } catch (err) {
         return res.status(500).json({ error: 'Captcha verification error' });
       }
@@ -431,7 +431,7 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
     }
 
     // Identify client IP for monthly quota tracking
-    const ipRaw = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '') as string;
+    const ipRaw = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '');
     const ip = ipRaw.split(',')[0].trim();
     const now = new Date();
     const year = now.getFullYear();
@@ -1288,8 +1288,12 @@ app.patch('/businesses/:id', authenticateToken, async (req: AuthRequest, res: Re
     const data: any = {};
     if (typeof name === 'string') data.name = name;
     if (typeof description === 'string') data.description = description;
-    if (analysis && typeof analysis === 'object') data.analysis = { ...(business.analysis || {}), ...analysis };
-    if (branding && typeof branding === 'object') data.branding = { ...(business.branding || {}), ...branding };
+    if (analysis && typeof analysis === 'object' && analysis !== null) {
+      data.analysis = Object.assign({}, (business.analysis || {}), analysis as Record<string, any>);
+    }
+    if (branding && typeof branding === 'object' && branding !== null) {
+      data.branding = Object.assign({}, (business.branding || {}), branding as Record<string, any>);
+    }
 
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
 
