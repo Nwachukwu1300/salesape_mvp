@@ -1,0 +1,97 @@
+import { Meta } from '@storybook/blocks';
+
+<Meta title="Design System/Design Tokens" />
+
+# Design Tokens
+
+Design tokens are the visual design atoms of the design system — specifically, they are named entities that store visual design attributes.
+
+## Colors
+
+### Brand Colors
+
+Our primary brand color is a vibrant magenta extracted from the SalesApe logo.
+
+- **Primary / Brand Magenta**: `oklch(0.6 0.3 320)` - Main brand color used for primary actions and highlights
+- **Brand Magenta Light**: `oklch(0.7 0.28 320)` - Lighter variant for hover states
+- **Brand Magenta Dark**: `oklch(0.5 0.32 320)` - Darker variant for active states
+
+### Semantic Colors
+
+- **Background**: `oklch(1 0 0)` (light) / `oklch(0.145 0 0)` (dark)
+- **Foreground**: `oklch(0.145 0 0)` (light) / `oklch(0.985 0 0)` (dark)
+- **Muted**: `oklch(0.97 0 0)` (light) / `oklch(0.269 0 0)` (dark)
+- **Destructive**: `oklch(0.577 0.245 27.325)` (light) / `oklch(0.704 0.191 22.216)` (dark)
+
+## Typography
+
+### Font Families
+
+- **Sans**: Inter, system-ui, -apple-system, "Segoe UI", Roboto
+- **Mono**: Geist Mono (if available)
+
+### Font Weights
+
+- Light: 300
+- Regular: 400
+- Medium: 500
+- Semibold: 600
+- Bold: 700
+- Extrabold: 800
+
+## Spacing
+
+Tailwind's default spacing scale is used throughout the application:
+- xs: 0.5rem (8px)
+- sm: 0.75rem (12px)
+- md: 1rem (16px)
+- lg: 1.5rem (24px)
+- xl: 2rem (32px)
+
+## Border Radius
+
+- **Base**: 0.625rem (10px)
+- **sm**: calc(var(--radius) - 4px)
+- **md**: calc(var(--radius) - 2px)
+- **lg**: var(--radius)
+- **xl**: calc(var(--radius) + 4px)
+
+## Shadows
+
+- **sm**: 0 1px 2px rgba(16,24,40,0.04)
+- **md**: 0 10px 30px rgba(2,6,23,0.08)
+- **lg**: 0 30px 60px rgba(2,6,23,0.12)
+
+## Transitions
+
+- **Default**: 200ms cubic-bezier(.4,0,.2,1)
+
+## Usage in Code
+
+### Tailwind Classes
+
+```tsx
+<div className="bg-primary text-primary-foreground rounded-lg p-4 shadow-md">
+  Primary Card
+</div>
+```
+
+### CSS Variables
+
+```css
+.custom-element {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: var(--radius);
+}
+```
+
+### Theme Tokens in Tailwind
+
+All theme tokens are available as Tailwind utilities:
+
+```tsx
+<Button className="bg-brand-magenta hover:bg-brand-magenta-dark">
+  Click Me
+</Button>
+```

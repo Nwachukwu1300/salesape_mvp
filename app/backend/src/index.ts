@@ -12,6 +12,7 @@ import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 import twilio from 'twilio';
 import { google } from 'googleapis';
+import { initializeSentry, attachSentryErrorHandler } from './utils/sentry.js';
 
 // Import new utilities and middleware
 import { logger, requestLogger } from './utils/logger.js';
@@ -47,6 +48,13 @@ const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const app = express();
 const prisma = new PrismaClient();
+
+// Initialize Sentry (no-op when SENTRY_DSN not set)
+try {
+  initializeSentry(app);
+} catch (err) {
+  logger.warn('Sentry initialization failed', { error: String(err) });
+}
 
 // --- Middleware ---
 app.use(cors());
@@ -371,10 +379,122 @@ app.post('/seo-audit', authenticateToken, async (req: AuthRequest, res: Response
       await prisma.auditUsage.create({ data: { userId, year, month, count: 1 } });
     }
 
-    res.json({ audit });
+    // Build a response shape expected by the frontend UI
+    const overallScore = Math.round((performance + seoScore + accessibility + bestPractices) / 4);
+    const auditResponse = {
+      id: audit.id,
+      url: audit.url,
+      performance: audit.performance,
+      seoScore: audit.seo,
+      accessibility: audit.accessibility,
+      bestPractices: audit.bestPractices,
+      recommendations: Array.isArray(audit.recommendations) ? audit.recommendations : (audit.recommendations ? [audit.recommendations] : []),
+      issues: audit.issues,
+      raw: audit.raw,
+      overallScore,
+      createdAt: audit.createdAt,
+    };
+
+    res.json({ audit: auditResponse });
   } catch (err) {
     logger.error('SEO audit error', { error: String(err) });
     res.status(500).json({ error: 'Failed to run SEO audit' });
+  }
+});
+
+// --- Free Audit Proxy (unauthenticated, IP-limited, optional CAPTCHA) ---
+app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
+  try {
+    const { url, instagramUrl, description, captchaToken } = req.body || {};
+    if (!url && !instagramUrl && !description) return res.status(400).json({ error: 'Provide a url, instagramUrl, or description' });
+
+    // CAPTCHA verification (optional): if RECAPTCHA_SECRET set, verify token
+    const recaptchaSecret = process.env.RECAPTCHA_SECRET || process.env.RECAPTCHA_KEY || '';
+    if (recaptchaSecret) {
+      if (!captchaToken) return res.status(400).json({ error: 'captchaToken required' });
+      try {
+        const verifyRes = await fetch(`https://www.google.com/recaptcha/api/siteverify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `secret=${encodeURIComponent(recaptchaSecret)}&response=${encodeURIComponent(captchaToken)}`,
+        });
+        const verifyJson = await verifyRes.json();
+        if (!verifyJson.success) return res.status(403).json({ error: 'Captcha verification failed' });
+      } catch (err) {
+        return res.status(500).json({ error: 'Captcha verification error' });
+      }
+    } else {
+      // In non-production/dev mode allow a special token to avoid blocking local development
+      if (captchaToken !== 'mock') {
+        return res.status(400).json({ error: 'captchaToken required (use token "mock" in dev)' });
+      }
+    }
+
+    // Identify client IP for monthly quota tracking
+    const ipRaw = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '') as string;
+    const ip = ipRaw.split(',')[0].trim();
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+
+    // Check usage for this IP this month (limit 1)
+    const usage = await prisma.auditUsage.findFirst({ where: { userId: ip, year, month } });
+    if (usage && usage.count >= 1) {
+      return res.status(429).json({ error: 'Monthly free audit limit reached for this IP' });
+    }
+
+    // Run scraping + PageSpeed
+    const scraped = await (async () => { try { return await scrapeWebsite(url); } catch { return {}; } })();
+    const pageSpeed = await fetchPageSpeedData(url);
+
+    const performance = pageSpeed?.performance ? Math.round(pageSpeed.performance * 100) : 0;
+    const seoScore = pageSpeed?.seo ? Math.round(pageSpeed.seo * 100) : 0;
+    const accessibility = pageSpeed?.accessibility ? Math.round(pageSpeed.accessibility * 100) : 0;
+
+    const bestPractices = calculateSeoScore({ pageSpeed });
+    const recommendations = generateAuditRecommendations({ seoKeywords: scraped.headings || [], heroHeadline: scraped.title || '' });
+
+    const audit = await prisma.seoAudit.create({
+      data: {
+        userId: null,
+        businessId: null,
+        url: url || (instagramUrl ? instagramUrl : (description ? 'description' : '')),
+        performance,
+        seo: seoScore,
+        accessibility,
+        bestPractices,
+        issues: (Object.keys(scraped || {}).length === 0 ? { warnings: ['Failed to scrape site content'] } : {}) as any,
+        recommendations: recommendations as any,
+        raw: { pageSpeed, scraped },
+      }
+    });
+
+    // Increment/create usage tracked by IP in auditUsage table
+    if (usage) {
+      await prisma.auditUsage.update({ where: { id: usage.id }, data: { count: usage.count + 1 } });
+    } else {
+      await prisma.auditUsage.create({ data: { userId: ip, year, month, count: 1 } });
+    }
+
+    const overallScore = Math.round((performance + seoScore + accessibility + bestPractices) / 4);
+    const auditResponse = {
+      id: audit.id,
+      url: audit.url,
+      performance: audit.performance,
+      seoScore: audit.seo,
+      accessibility: audit.accessibility,
+      bestPractices: audit.bestPractices,
+      recommendations: Array.isArray(audit.recommendations) ? audit.recommendations : (audit.recommendations ? [audit.recommendations] : []),
+      issues: audit.issues,
+      raw: audit.raw,
+      overallScore,
+      createdAt: audit.createdAt,
+    };
+
+    res.json({ audit: auditResponse });
+  } catch (err) {
+    logger.error('Free audit error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to run free audit' });
   }
 });
 
@@ -1149,6 +1269,35 @@ app.get('/businesses/:id', authenticateToken, async (req: AuthRequest, res: Resp
   } catch (err) {
     logger.error('Business lookup error', { error: err });
     res.status(500).json({ error: 'Failed to fetch business' });
+  }
+});
+
+// Update business (partial)
+app.patch('/businesses/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = paramToString(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Business id is required' });
+
+    const business = await prisma.business.findUnique({ where: { id } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+
+    const userId = req.userId!;
+    if (business.userId !== userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const { name, description, analysis, branding } = req.body as any;
+    const data: any = {};
+    if (typeof name === 'string') data.name = name;
+    if (typeof description === 'string') data.description = description;
+    if (analysis && typeof analysis === 'object') data.analysis = { ...(business.analysis || {}), ...analysis };
+    if (branding && typeof branding === 'object') data.branding = { ...(business.branding || {}), ...branding };
+
+    if (Object.keys(data).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+
+    const updated = await prisma.business.update({ where: { id }, data });
+    res.json(updated);
+  } catch (err) {
+    logger.error('Business update error', { error: err });
+    res.status(500).json({ error: 'Failed to update business' });
   }
 });
 
@@ -2535,6 +2684,13 @@ app.post('/businesses/:businessId/payments', authenticateToken, async (req: Auth
     res.status(500).json({ error: 'Failed to process payment' });
   }
 });
+
+// Attach Sentry error handler (must be after all routes but before listen)
+try {
+  attachSentryErrorHandler(app);
+} catch (err) {
+  logger.warn('Failed to attach Sentry error handler', { error: String(err) });
+}
 
 // --- Server Startup ---
 const server = app.listen(PORT, () => {
