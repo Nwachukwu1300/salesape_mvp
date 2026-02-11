@@ -61,21 +61,29 @@ Voice or chat input builds and runs a business end-to-end with full automation.
 ```
 salesape_mvp/
 ├── app/
-│   ├── backend/                    # Backend API (Your work)
+│   ├── backend/                    # Backend API (Express + Prisma)
 │   │   ├── src/
 │   │   │   └── index.ts            # Main server with API endpoints
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   │
-│   └── frontend/                   # Frontend app (Teammate work)
-│       ├── app/
-│       │   ├── components/
-│       │   │   └── LeadForm.tsx    # Lead submission form
-│       │   ├── page.tsx            # Home/onboarding page
-│       │   ├── layout.tsx          # Root layout
-│       │   └── globals.css
-│       ├── package.json
-│       └── tsconfig.json
+│   ├── frontend/                   # Frontend app (Next.js)
+│   │   ├── pages/
+│   │   ├── components/
+│   │   ├── contexts/
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│
+├── figma-export/                   # Design system & UI components (Vite + React)
+│   ├── src/
+│   │   ├── components/
+│   │   ├── contexts/               # AuthContext, SubscriptionContext (wired to backend)
+│   │   ├── screens/
+│   │   ├── pages/
+│   │   ├── App.tsx
+│   │   └── main.tsx
+│   ├── package.json
+│   └── tsconfig.json
 │
 └── README.md
 ```
@@ -117,7 +125,16 @@ cd app/frontend
 npm run dev
 ```
 
-Open http://localhost:3000 in your browser.
+**Start figma-export design system** (port 3002):
+```bash
+cd figma-export
+npm run dev
+```
+
+Access the applications:
+- **Frontend (SalesAPE App)**: http://localhost:3000
+- **Backend API**: http://localhost:3001
+- **Design System (figma-export)**: http://localhost:3002
 
 ---
 
@@ -200,22 +217,27 @@ curl http://localhost:3001/leads
 
 ## Current Features
 
-**MVP v0.3 (Current - Phase 4 Complete)**
+**MVP v0.4 (Current - Phase 5 Complete)**
 - Complete onboarding flow with URL/Instagram input
 - Web scraping of business information from URLs
 - AI-powered business analysis
 - Multiple website template selection
 - Custom branding (colors, fonts, logos)
 - Voice and chat input for business description
-- User authentication with JWT
+- **User authentication with JWT** (email/password, Google OAuth, Apple Sign-In)
 - Lead capture form
 - Lead storage with Prisma ORM
 - Booking calendar backend
 - **Team collaboration** (invite members, manage roles)
 - **Advanced lead routing** (auto-assign by service/source)
 - **Payment integration** (subscription plans: Basic/Pro/Enterprise)
+- **Subscription usage tracking** (websites, leads, SEO audits)
+- **OAuth 2.0 Support**:
+  - 🔵 Google Sign-In
+  - 🍎 Apple Sign-In
 - Health check endpoint
 - CORS enabled for local development
+- **Figma-export Design System** (port 3002) - Complete UI component library
 
 **Phase 4 Highlights - Now Complete!**
 - 🎤 **Voice Input**: Use Web Speech API to describe your business by voice
@@ -307,7 +329,15 @@ curl http://localhost:3001/leads
 - [x] Advanced lead routing
 - [x] Team collaboration features
 - [x] Payment integration
-
+### Phase 5: OAuth & Design System (Current)
+- [x] Google OAuth 2.0 sign-in
+- [x] Apple Sign-In support
+- [x] OAuth callback handling
+- [x] Figma-export design system (port 3002)
+- [x] AuthContext with social login
+- [x] Subscription usage metrics endpoint (`/businesses/:businessId/usage`)
+- [ ] Email verification flow
+- [ ] Advanced OAuth scopes (calendar, contacts)
 ---
 
 ## MVP Constraints

@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Business" ADD COLUMN "phone" TEXT,
+ADD COLUMN "address" TEXT,
+ADD COLUMN "hours" JSONB,
+ADD COLUMN "views" INTEGER NOT NULL DEFAULT 0;

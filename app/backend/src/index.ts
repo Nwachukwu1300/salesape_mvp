@@ -12,7 +12,8 @@ import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 import twilio from 'twilio';
 import { google } from 'googleapis';
-import { initializeSentry, attachSentryErrorHandler } from './utils/sentry.js';
+import crypto from 'crypto';
+// Sentry removed: monitoring disabled in codebase
 
 // Import new utilities and middleware
 import { logger, requestLogger } from './utils/logger.js';
@@ -49,12 +50,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-producti
 const app = express();
 const prisma = new PrismaClient();
 
-// Initialize Sentry (no-op when SENTRY_DSN not set)
-try {
-  initializeSentry(app);
-} catch (err) {
-  logger.warn('Sentry initialization failed', { error: String(err) });
-}
+// NOTE: Sentry initialization moved to after routes and before the error handler
+// to avoid any accidental startup impact. See utils/sentry.ts for config.
 
 // --- Middleware ---
 app.use(cors());
@@ -73,11 +70,68 @@ interface TokenPayload {
   email: string;
 }
 
+// --- Authentication Middleware (must be defined before route usage) ---
+const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    req.userId = decoded.userId;
+    req.email = decoded.email;
+    next();
+  });
+};
+
 // Helper to normalize route params which can be string | string[] | undefined
 function paramToString(p: string | string[] | undefined): string | undefined {
   if (Array.isArray(p)) return p[0];
   return p;
 }
+
+// Lightweight health endpoint for readiness checks
+app.get('/health', async (_req, res) => {
+  try {
+    // quick DB check
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', db: 'connected' });
+  } catch (err) {
+    res.status(503).json({ status: 'error', db: 'disconnected' });
+  }
+});
+
+// Get monthly usage (SEO/free audits) for a business (returns counts for current month)
+app.get('/businesses/:businessId/usage', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    if (!businessId) return res.status(400).json({ error: 'Business id is required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
+
+    // auditUsage stores counts per userId (or IP for free-audit)
+    const usage = await prisma.auditUsage.findFirst({ where: { userId: req.userId!, year, month } });
+    const seoAudits = usage ? usage.count : 0;
+
+    res.json({ seoAudits });
+  } catch (err) {
+    console.error('Get usage error:', err);
+    res.status(500).json({ error: 'Failed to fetch usage' });
+  }
+});
+
+
 
 // Helper to apply automation rules for lead status changes
 async function applyLeadAutomationRules(businessId: string, leadId: string, triggerEvent: string) {
@@ -100,25 +154,6 @@ async function applyLeadAutomationRules(businessId: string, leadId: string, trig
     logger.error('Automation rule error', { error: err });
   }
 }
-
-// --- Authentication Middleware ---
-const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
-  }
-
-  jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid or expired token' });
-    }
-    req.userId = decoded.userId;
-    req.email = decoded.email;
-    next();
-  });
-};
 
 // --- Helper Functions ---
 
@@ -474,6 +509,27 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
       await prisma.auditUsage.update({ where: { id: usage.id }, data: { count: usage.count + 1 } });
     } else {
       await prisma.auditUsage.create({ data: { userId: ip, year, month, count: 1 } });
+    }
+
+    // If an Authorization token was provided, also increment the authenticated user's usage
+    try {
+      const authHeader = String(req.headers.authorization || '');
+      if (authHeader.startsWith('Bearer ')) {
+        const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+        const decoded: any = jwt.verify(token, JWT_SECRET);
+        if (decoded && decoded.userId) {
+          const uid = decoded.userId as string;
+          const userUsage = await prisma.auditUsage.findFirst({ where: { userId: uid, year, month } });
+          if (userUsage) {
+            await prisma.auditUsage.update({ where: { id: userUsage.id }, data: { count: userUsage.count + 1 } });
+          } else {
+            await prisma.auditUsage.create({ data: { userId: uid, year, month, count: 1 } });
+          }
+        }
+      }
+    } catch (err) {
+      // Do not fail the audit if token verification fails; just log
+      logger.warn('free-audit: auth token verify failed', { error: String(err) });
     }
 
     const overallScore = Math.round((performance + seoScore + accessibility + bestPractices) / 4);
@@ -837,21 +893,25 @@ app.post('/auth/register', authLimiter, authValidation.register, validationError
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
+    // Create user and a refresh token
+    const refreshToken = crypto.randomBytes(48).toString('hex');
     const user = await prisma.user.create({
       data: {
         email,
         password: hashedPassword,
         name,
+        refreshToken,
       }
     });
 
-    // Generate token
+    // Generate access token (JWT)
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
+
+    // (refresh token already created and stored above for registration)
 
     logger.info('User registered', { userId: user.id, email: user.email });
     // Send welcome email to new user
@@ -862,6 +922,7 @@ app.post('/auth/register', authLimiter, authValidation.register, validationError
     }
     res.status(201).json({
       token,
+      refreshToken,
       user: { id: user.id, email: user.email, name: user.name }
     });
   } catch (err: any) {
@@ -901,13 +962,166 @@ app.post('/auth/login', authLimiter, authValidation.login, validationErrorHandle
     } catch (e) {
       logger.warn('Failed to send login notification email', { error: e });
     }
+    // Rotate refresh token on login
+    const refreshToken = crypto.randomBytes(48).toString('hex');
+    try {
+      await prisma.user.update({ where: { id: user.id }, data: { refreshToken } });
+    } catch (e) {
+      logger.warn('Failed to store refresh token', { error: String(e) });
+    }
+
     res.json({
       token,
+      refreshToken,
       user: { id: user.id, email: user.email, name: user.name }
     });
   } catch (err: any) {
     logger.error('Login error', { error: err && err.message ? err.message : String(err) });
     res.status(500).json({ error: 'Login failed', details: err && err.message ? err.message : undefined });
+  }
+});
+
+// Refresh access token using refresh token (rotate refresh token)
+app.post('/auth/refresh', async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) return res.status(400).json({ error: 'refreshToken is required' });
+
+    const user = await prisma.user.findFirst({ where: { refreshToken } });
+    if (!user) return res.status(401).json({ error: 'Invalid refresh token' });
+
+    // Issue new access token
+    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+
+    // Rotate refresh token
+    const newRefresh = crypto.randomBytes(48).toString('hex');
+    await prisma.user.update({ where: { id: user.id }, data: { refreshToken: newRefresh } });
+
+    res.json({ token, refreshToken: newRefresh, user: { id: user.id, email: user.email, name: user.name } });
+  } catch (err) {
+    logger.error('Refresh token error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to refresh token' });
+  }
+});
+
+// Logout - revoke current user's refresh token
+app.post('/auth/logout', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    await prisma.user.update({ where: { id: userId }, data: { refreshToken: null } });
+    res.json({ message: 'Logged out' });
+  } catch (err) {
+    logger.error('Logout error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to logout' });
+  }
+});
+
+// Revoke a refresh token (accepts refreshToken in body)
+app.post('/auth/revoke', async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) return res.status(400).json({ error: 'refreshToken required' });
+    const user = await prisma.user.findFirst({ where: { refreshToken } });
+    if (!user) return res.status(404).json({ error: 'Token not found' });
+    await prisma.user.update({ where: { id: user.id }, data: { refreshToken: null } });
+    res.json({ message: 'Refresh token revoked' });
+  } catch (err) {
+    logger.error('Revoke token error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to revoke token' });
+  }
+});
+
+// --- OAuth: Google & Apple Sign-In ---
+
+// Start Google OAuth flow
+app.get('/auth/google', (req: Request, res: Response) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID || '';
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/google/callback`;
+  const state = crypto.randomBytes(12).toString('hex');
+  const scope = encodeURIComponent('openid email profile');
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&access_type=offline&prompt=consent&state=${state}`;
+  res.redirect(url);
+});
+
+// Google OAuth callback
+app.get('/auth/google/callback', async (req: Request, res: Response) => {
+  try {
+    const code = String((req.query as any).code || '');
+    if (!code) return res.status(400).json({ error: 'Code missing' });
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.GOOGLE_CLIENT_ID || '',
+        client_secret: process.env.GOOGLE_CLIENT_SECRET || '',
+        redirect_uri: process.env.GOOGLE_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/google/callback`,
+        grant_type: 'authorization_code',
+      } as any) as any,
+    });
+
+    const tokenJson = await tokenRes.json();
+    const accessToken = tokenJson.access_token;
+    if (!accessToken) return res.status(400).json({ error: 'Failed to obtain access token' });
+
+    const userInfoRes = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${accessToken}`);
+    const profile = await userInfoRes.json();
+    const email = profile.email;
+    const name = profile.name || profile.given_name || '';
+
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      const refreshToken = crypto.randomBytes(48).toString('hex');
+      user = await prisma.user.create({ data: { email, name, refreshToken, password: null } });
+    }
+
+    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+
+    const frontend = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    return res.redirect(`${frontend}/auth/callback?token=${encodeURIComponent(token)}`);
+  } catch (err) {
+    console.error('Google OAuth callback error', err);
+    res.status(500).json({ error: 'Google OAuth failed' });
+  }
+});
+
+// Start Apple Sign In flow (redirect)
+app.get('/auth/apple', (req: Request, res: Response) => {
+  const clientId = process.env.APPLE_CLIENT_ID || '';
+  const redirectUri = process.env.APPLE_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/apple/callback`;
+  if (!clientId) return res.status(501).json({ error: 'Apple Sign-In not configured' });
+
+  const state = crypto.randomBytes(12).toString('hex');
+  const scope = encodeURIComponent('name email');
+  const url = `https://appleid.apple.com/auth/authorize?response_type=code%20id_token&response_mode=form_post&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${state}`;
+  res.redirect(url);
+});
+
+// Apple callback (accepts posted id_token or code). For dev, we will accept id_token in body and decode without full verification.
+app.post('/auth/apple/callback', express.urlencoded({ extended: true }), async (req: Request, res: Response) => {
+  try {
+    const idToken = (req.body && req.body.id_token) || (req.body && req.body.idToken) || null;
+    if (!idToken) return res.status(400).json({ error: 'id_token required' });
+
+    const parts = (idToken as string).split('.');
+    if (parts.length !== 3) return res.status(400).json({ error: 'Invalid id_token' });
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+    const email = payload.email as string;
+    const name = payload.name || '';
+
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      const refreshToken = crypto.randomBytes(48).toString('hex');
+      user = await prisma.user.create({ data: { email, name, refreshToken, password: null } });
+    }
+
+    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const frontend = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    return res.redirect(`${frontend}/auth/callback?token=${encodeURIComponent(token)}`);
+  } catch (err) {
+    console.error('Apple callback error', err);
+    res.status(500).json({ error: 'Apple callback failed' });
   }
 });
 
@@ -1086,6 +1300,54 @@ app.post('/businesses/:businessId/generate-social-content', authenticateToken, a
   }
 });
 
+// Generate deterministic WebsiteConfig from Business.analysis
+app.post('/generate-website-config', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.body;
+    if (!businessId) return res.status(400).json({ error: 'businessId is required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+
+    const analysis = (business.analysis || {}) as any;
+    // Map analysis.businessUnderstandingCanonical or inferred structure into WebsiteConfig
+    const bu = analysis.businessUnderstandingCanonical || analysis.businessUnderstanding || analysis;
+
+    const config = {
+      hero: {
+        title: (bu && bu.businessName) || business.name || 'Welcome',
+        subtitle: (bu && (bu.heroSubtitle || bu.tagline)) || business.description || 'We help customers',
+        ctaText: 'Get Started',
+      },
+      services: {
+        title: 'Services',
+        items: (bu && bu.services && bu.services.map((s: string) => ({ name: s, description: '' }))) || [],
+      },
+      about: {
+        title: `About ${(bu && bu.businessName) || business.name || ''}`,
+        content: (bu && bu.description) || business.description || '',
+      },
+      contact: {
+        email: (analysis && analysis.scraped && analysis.scraped.email) || '',
+        phone: (analysis && analysis.scraped && analysis.scraped.phone) || undefined,
+      },
+      theme: {
+        primaryColor: (bu && bu.brandColors && bu.brandColors[0]) || '#f724de',
+        secondaryColor: (bu && bu.brandColors && bu.brandColors[1]) || '#000000',
+        font: 'Inter',
+      }
+    };
+
+    // persist into dedicated generatedConfig field
+    await prisma.business.update({ where: { id: businessId }, data: { generatedConfig: config } });
+
+    res.json({ config });
+  } catch (err) {
+    logger.error('Generate website config error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to generate website config' });
+  }
+});
+
 // Public website data (no auth) - for preview and published sites
 app.get('/businesses/:id/public', async (req: Request, res: Response) => {
   try {
@@ -1227,7 +1489,7 @@ app.post('/businesses', authenticateToken, async (req: AuthRequest, res: Respons
         name: name || 'My Business',
         url,
         description,
-        publishedUrl: `https://${Date.now()}.salesape.app/website`,
+        publishedUrl: `https://${Date.now()}.salesape.ai/web`,
         analysis,
       }
     });
@@ -1305,6 +1567,78 @@ app.patch('/businesses/:id', authenticateToken, async (req: AuthRequest, res: Re
   }
 });
 
+// Delete business (and all related records)
+app.delete('/businesses/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = paramToString(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Business id is required' });
+
+    const userId = req.userId!;
+    
+    console.log(`[Delete Business] START - ID: ${id}, User: ${userId}`);
+
+    // Verify business exists and user owns it
+    const business = await prisma.business.findUnique({ 
+      where: { id },
+      select: { id: true, name: true, userId: true }
+    });
+    
+    if (!business) {
+      console.error(`[Delete Business] NOT FOUND`);
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    if (business.userId !== userId) {
+      console.error(`[Delete Business] UNAUTHORIZED - Owner: ${business.userId}`);
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    console.log(`[Delete Business] Verified ownership - Name: ${business.name}`);
+
+    // Delete business - database CASCADE will handle related records
+    console.log(`[Delete Business] Attempting direct delete with CASCADE...`);
+    
+    const deleted = await prisma.business.delete({ where: { id } });
+    
+    console.log(`[Delete Business] SUCCESS - Deleted: ${deleted.name}`);
+
+    res.json({
+      message: 'Website deleted successfully',
+      business: deleted,
+    });
+  } catch (err: any) {
+    console.error(`[Delete Business] ERROR:`, {
+      code: err?.code,
+      message: err?.message,
+      meta: err?.meta,
+      stack: err?.stack
+    });
+    
+    // Provide more detailed error response
+    let errorDetails = 'Failed to delete business';
+    if (err?.code === 'P2014') {
+      errorDetails = 'Cannot delete: related records exist';
+    } else if (err?.code === 'P2025') {
+      errorDetails = 'Business record not found';
+    } else if (err?.message) {
+      errorDetails = err.message;
+    }
+    
+    logger.error('Business delete error', { 
+      error: err, 
+      businessId: req.params.id,
+      userId: req.userId
+    });
+    
+    res.status(500).json({ 
+      error: 'Failed to delete business',
+      details: errorDetails,
+      code: err?.code
+    });
+  }
+});
+
+
 // Get all Businesses for user
 app.get('/businesses', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -1350,35 +1684,222 @@ app.get('/businesses/:id/template', authenticateToken, async (req: AuthRequest, 
       {
         id: 'modern',
         name: 'Modern Professional',
+        description: 'Clean, corporate design perfect for services and B2B',
         preview: '/templates/modern.png',
-        style: { color: '#1a202c', accent: '#3182ce', font: 'Inter, sans-serif' },
+        style: { 
+          bgColor: '#ffffff',
+          textColor: '#1a202c', 
+          accent: '#0066cc', 
+          secondary: '#f0f4f8',
+          font: 'Inter, -apple-system, sans-serif',
+          headingFont: 'Inter, -apple-system, sans-serif'
+        },
+        layout: 'modern',
         sections: [
-          { heading: 'About', content: business.description || '' },
-          { heading: 'Services', content: Array.isArray(analysisAny['Main services offered']) ? analysisAny['Main services offered'].join(', ') : (analysisAny['Main services offered'] || '') },
-          { heading: 'Contact', content: JSON.stringify(analysisAny['Any contact info'] || {}) },
+          { 
+            type: 'feature-grid',
+            heading: 'Our Services', 
+            content: 'Discover what we offer',
+            items: ['Professional Solutions', 'Expert Results', 'Client Focused']
+          },
+          { 
+            type: 'two-column',
+            heading: 'About Our Business', 
+            content: business.description || 'Professional services tailored to your needs' 
+          },
+          { 
+            type: 'cta-section',
+            heading: 'Ready to Get Started?', 
+            content: 'Let\'s work together to achieve your goals',
+            buttonText: 'Schedule a Consultation'
+          },
         ],
+        seoMeta: {
+          keywords: 'professional services, consulting, business solutions',
+          structuredData: 'LocalBusiness'
+        }
       },
       {
         id: 'creative',
         name: 'Creative Portfolio',
+        description: 'Bold, image-first design for creators and agencies',
         preview: '/templates/creative.png',
-        style: { color: '#fff', accent: '#e53e3e', font: 'Montserrat, sans-serif' },
+        style: { 
+          bgColor: '#0a0a0a',
+          textColor: '#ffffff', 
+          accent: '#ff4444', 
+          secondary: '#1a1a1a',
+          font: 'Montserrat, sans-serif',
+          headingFont: 'Montserrat, sans-serif'
+        },
+        layout: 'creative',
         sections: [
-          { heading: 'Our Story', content: business.description || '' },
-          { heading: 'What We Do', content: Array.isArray(analysisAny['Main services offered']) ? analysisAny['Main services offered'].join(', ') : (analysisAny['Main services offered'] || '') },
-          { heading: 'Get in Touch', content: JSON.stringify(analysisAny['Any contact info'] || {}) },
+          { 
+            type: 'hero-large',
+            heading: 'Unleash Your Creativity', 
+            content: business.description || 'Bold designs that stand out'
+          },
+          { 
+            type: 'gallery-grid',
+            heading: 'Our Work', 
+            content: 'Showcase of recent projects'
+          },
+          { 
+            type: 'testimonial-carousel',
+            heading: 'What Clients Say',
+            items: ['Exceptional work and attention to detail', 'Transformed our brand', 'Highly recommended']
+          },
+          { 
+            type: 'cta-full',
+            heading: 'Let\'s Create Something Amazing', 
+            content: 'Ready to bring your vision to life?',
+            buttonText: 'Start Your Project'
+          },
         ],
+        seoMeta: {
+          keywords: 'creative design, portfolio, agency services',
+          structuredData: 'CreativeWork'
+        }
       },
       {
         id: 'minimal',
         name: 'Minimal Elegant',
+        description: 'Luxury minimalist design with sophisticated appeal',
         preview: '/templates/minimal.png',
-        style: { color: '#f7fafc', accent: '#2d3748', font: 'Roboto, sans-serif' },
+        style: { 
+          bgColor: '#fafaf8',
+          textColor: '#2c2c2c', 
+          accent: '#8b7355', 
+          secondary: '#f0ede6',
+          font: 'Georgia, serif',
+          headingFont: 'Playfair Display, serif'
+        },
+        layout: 'minimal',
         sections: [
-          { heading: 'Welcome', content: business.description || '' },
-          { heading: 'Services', content: Array.isArray(analysisAny['Main services offered']) ? analysisAny['Main services offered'].join(', ') : (analysisAny['Main services offered'] || '') },
-          { heading: 'Contact', content: JSON.stringify(analysisAny['Any contact info'] || {}) },
+          { 
+            type: 'hero-centered',
+            heading: 'Welcome', 
+            subheading: 'Timeless elegance in every detail',
+            content: business.description || 'Experience sophistication'
+          },
+          { 
+            type: 'feature-minimal',
+            heading: 'Our Offering',
+            items: ['Crafted Excellence', 'Premium Quality', 'Attention to Detail']
+          },
+          { 
+            type: 'quote-section',
+            heading: 'A Philosophy',
+            content: 'Simplicity is the ultimate sophistication',
+            author: business.name || 'Our Brand'
+          },
+          { 
+            type: 'cta-centered',
+            heading: 'Begin Your Journey', 
+            content: 'Discover the difference quality makes',
+            buttonText: 'Explore More'
+          },
         ],
+        seoMeta: {
+          keywords: 'luxury, premium, elegance, sophistication',
+          structuredData: 'LocalBusiness'
+        }
+      },
+      {
+        id: 'bold',
+        name: 'Bold & Vibrant',
+        description: 'Eye-catching, energetic design for maximum engagement',
+        preview: '/templates/bold.png',
+        style: { 
+          bgColor: '#fef9f0',
+          textColor: '#1a1a1a', 
+          accent: '#ff6b35', 
+          secondary: '#ffc857',
+          tertiary: '#004e89',
+          font: 'Poppins, -apple-system, sans-serif',
+          headingFont: 'Poppins, -apple-system, sans-serif'
+        },
+        layout: 'bold',
+        sections: [
+          { 
+            type: 'hero-bold',
+            heading: 'Welcome to Something Special', 
+            content: business.description || 'Experience bold innovation',
+            backgroundGradient: true
+          },
+          { 
+            type: 'benefit-cards',
+            heading: 'Why Choose Us',
+            items: [
+              { title: 'Fast & Efficient', icon: '⚡' },
+              { title: 'Quality Assured', icon: '✓' },
+              { title: 'Customer Focused', icon: '❤' }
+            ]
+          },
+          { 
+            type: 'social-proof',
+            heading: 'Trusted by Many',
+            stats: [
+              { number: '500+', label: 'Happy Clients' },
+              { number: '10+', label: 'Years Experience' },
+              { number: '100%', label: 'Satisfaction' }
+            ]
+          },
+          { 
+            type: 'cta-bold',
+            heading: 'Don\'t Wait, Join Us Today!', 
+            buttonText: 'Get Started Now',
+            buttonSize: 'large'
+          },
+        ],
+        seoMeta: {
+          keywords: 'dynamic, innovative, solution-focused',
+          structuredData: 'LocalBusiness'
+        }
+      },
+      {
+        id: 'sleek',
+        name: 'Sleek & Dark',
+        description: 'Modern tech-forward design with premium feel',
+        preview: '/templates/sleek.png',
+        style: { 
+          bgColor: '#0f1419',
+          textColor: '#e2e8f0', 
+          accent: '#a78bfa', 
+          secondary: '#1e293b',
+          tertiary: '#3b82f6',
+          font: 'Ubuntu, -apple-system, sans-serif',
+          headingFont: 'Ubuntu, -apple-system, sans-serif'
+        },
+        layout: 'sleek',
+        sections: [
+          { 
+            type: 'hero-tech',
+            heading: 'Welcome to the Future', 
+            content: business.description || 'Advanced solutions for modern challenges',
+            hasGradient: true
+          },
+          { 
+            type: 'feature-tech',
+            heading: 'Core Features',
+            items: ['Advanced Technology', 'Seamless Integration', 'Data Security']
+          },
+          { 
+            type: 'timeline-section',
+            heading: 'Our Journey',
+            content: 'Building excellence step by step'
+          },
+          { 
+            type: 'cta-tech',
+            heading: 'Ready for Next-Gen Solutions?', 
+            content: 'Transform your business with cutting-edge technology',
+            buttonText: 'Explore Solutions'
+          },
+        ],
+        seoMeta: {
+          keywords: 'technology, innovation, digital solutions',
+          structuredData: 'SoftwareApplication'
+        }
       },
     ];
 
@@ -1391,15 +1912,188 @@ app.get('/businesses/:id/template', authenticateToken, async (req: AuthRequest, 
       recommended = templates.find(t => t.id === 'creative') || templates[0];
     }
 
+    // Fetch real testimonials from database (Prisma client fix pending)
+    let testimonials: any[] = [];
+    try {
+      if (prisma && prisma.testimonial) {
+        testimonials = await prisma.testimonial.findMany({
+          where: { businessId: id, isPublished: true },
+          orderBy: { order: 'asc' }
+        });
+      }
+    } catch (testimonyErr) {
+      console.log('Testimonials query skipped, using empty array');
+    }
+
+    // Fetch branding data (which includes scraped images)
+    const brandingData = business.branding || {};
+
     res.json({
       templates,
       recommended,
       businessType,
       analysis,
+      testimonials,
+      branding: brandingData,
     });
   } catch (err) {
     console.error('Template fetch error:', err);
     res.status(500).json({ error: 'Failed to fetch template' });
+  }
+});
+
+// --- Testimonials Endpoints (Protected) ---
+
+// Create Testimonial
+app.post('/businesses/:businessId/testimonials', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const { clientName, clientTitle, content, rating, imageUrl } = req.body;
+
+    if (!businessId || !clientName || !content) {
+      return res.status(400).json({ error: 'Business ID, client name, and content are required' });
+    }
+
+    const business = await prisma.business.findUnique({
+      where: { id: businessId }
+    });
+
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    const userId = req.userId!;
+    if (business.userId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const testimonial = await prisma.testimonial.create({
+      data: {
+        businessId,
+        clientName,
+        clientTitle: clientTitle || null,
+        content,
+        rating: rating || null,
+        imageUrl: imageUrl || null,
+      }
+    });
+
+    res.status(201).json(testimonial);
+  } catch (err) {
+    console.error('Testimonial creation error:', err);
+    res.status(500).json({ error: 'Failed to create testimonial' });
+  }
+});
+
+// Get Testimonials for a Business
+app.get('/businesses/:businessId/testimonials', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+
+    if (!businessId) {
+      return res.status(400).json({ error: 'Business ID is required' });
+    }
+
+    const business = await prisma.business.findUnique({
+      where: { id: businessId }
+    });
+
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    const userId = req.userId!;
+    if (business.userId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const testimonials = await prisma.testimonial.findMany({
+      where: { businessId, isPublished: true },
+      orderBy: { order: 'asc' }
+    });
+
+    res.json(testimonials);
+  } catch (err) {
+    console.error('Testimonials fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch testimonials' });
+  }
+});
+
+// Update Testimonial
+app.patch('/businesses/:businessId/testimonials/:testimonialId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const testimonialId = paramToString(req.params.testimonialId);
+    const { clientName, clientTitle, content, rating, imageUrl, isPublished, order } = req.body;
+
+    if (!businessId || !testimonialId) {
+      return res.status(400).json({ error: 'Business ID and testimonial ID are required' });
+    }
+
+    const business = await prisma.business.findUnique({
+      where: { id: businessId }
+    });
+
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    const userId = req.userId!;
+    if (business.userId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const testimonial = await prisma.testimonial.update({
+      where: { id: testimonialId },
+      data: {
+        ...(clientName && { clientName }),
+        ...(clientTitle !== undefined && { clientTitle }),
+        ...(content && { content }),
+        ...(rating !== undefined && { rating }),
+        ...(imageUrl !== undefined && { imageUrl }),
+        ...(isPublished !== undefined && { isPublished }),
+        ...(order !== undefined && { order }),
+      }
+    });
+
+    res.json(testimonial);
+  } catch (err) {
+    console.error('Testimonial update error:', err);
+    res.status(500).json({ error: 'Failed to update testimonial' });
+  }
+});
+
+// Delete Testimonial
+app.delete('/businesses/:businessId/testimonials/:testimonialId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const testimonialId = paramToString(req.params.testimonialId);
+
+    if (!businessId || !testimonialId) {
+      return res.status(400).json({ error: 'Business ID and testimonial ID are required' });
+    }
+
+    const business = await prisma.business.findUnique({
+      where: { id: businessId }
+    });
+
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    const userId = req.userId!;
+    if (business.userId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    await prisma.testimonial.delete({
+      where: { id: testimonialId }
+    });
+
+    res.json({ message: 'Testimonial deleted successfully' });
+  } catch (err) {
+    console.error('Testimonial deletion error:', err);
+    res.status(500).json({ error: 'Failed to delete testimonial' });
   }
 });
 
@@ -1558,6 +2252,52 @@ app.get('/businesses/:businessId/bookings', authenticateToken, async (req: AuthR
   } catch (err) {
     console.error('Bookings fetch error:', err);
     res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
+});
+
+// Delete Booking
+app.delete('/businesses/:businessId/bookings/:bookingId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const bookingId = paramToString(req.params.bookingId);
+
+    if (!businessId || !bookingId) {
+      return res.status(400).json({ error: 'Business id and booking id are required' });
+    }
+
+    const business = await prisma.business.findUnique({
+      where: { id: businessId }
+    });
+
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    const userId = req.userId!;
+    if (business.userId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId }
+    });
+
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    if (booking.businessId !== businessId) {
+      return res.status(403).json({ error: 'Booking does not belong to this business' });
+    }
+
+    await prisma.booking.delete({
+      where: { id: bookingId }
+    });
+
+    res.json({ message: 'Booking deleted successfully' });
+  } catch (err) {
+    console.error('Booking delete error:', err);
+    res.status(500).json({ error: 'Failed to delete booking' });
   }
 });
 
@@ -1744,7 +2484,7 @@ app.post('/businesses/:businessId/publish', authenticateToken, async (req: AuthR
     // Generate unique slug from business name
     const slug = business.name.toLowerCase().replace(/\s+/g, '-').substring(0, 50);
     const uniqueSlug = `${slug}-${Date.now().toString(36)}`;
-    const publishedUrl = `https://${uniqueSlug}.salesape.app/website`;
+    const publishedUrl = `https://${uniqueSlug}.salesape.ai/web`;
 
     const updatedBusiness = await prisma.business.update({
       where: { id: businessId },
@@ -1795,6 +2535,17 @@ app.get('/website/:slug', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Website not found' });
     }
 
+    // Increment views count
+    const updatedBusiness = await prisma.business.update({
+      where: { id: business.id },
+      data: { views: { increment: 1 } },
+      include: {
+        leads: true,
+        bookings: true,
+        availableSlots: true,
+      }
+    });
+
     // Track analytics
     await prisma.analytics.create({
       data: {
@@ -1806,19 +2557,124 @@ app.get('/website/:slug', async (req: Request, res: Response) => {
 
     // Return website data for frontend to render
     res.json({
-      business,
-      template: business.analysis || {},
+      business: updatedBusiness,
+      template: updatedBusiness.analysis || {},
       leadForm: {
-        title: `Get in touch with ${business.name}`,
+        title: `Get in touch with ${updatedBusiness.name}`,
         fields: ['name', 'email', 'company', 'message'],
       },
       bookingForm: {
-        enabled: business.bookings && business.bookings.length > 0,
+        enabled: updatedBusiness.bookings && updatedBusiness.bookings.length > 0,
       }
     });
   } catch (err) {
     console.error('Website fetch error:', err);
     res.status(500).json({ error: 'Failed to fetch website' });
+  }
+});
+
+// Development Preview - View unpublished websites (no auth required for dev/testing only)
+// NOTE: This endpoint should be removed or protected in production
+app.get('/public/business', async (req: Request, res: Response) => {
+  try {
+    const id = req.query.id as string;
+    const slug = req.query.slug as string;
+
+    if (!id && !slug) {
+      return res.status(400).json({ error: 'Either id or slug parameter is required' });
+    }
+
+    let business;
+    
+    if (id) {
+      // Find by ID (for dev preview of unpublished websites)
+      business = await prisma.business.findUnique({
+        where: { id },
+        include: {
+          bookings: true,
+          availableSlots: true,
+        }
+      });
+    } else {
+      // Find by slug (for public/published websites)
+      business = await prisma.business.findUnique({
+        where: { slug },
+        include: {
+          bookings: true,
+          availableSlots: true,
+        }
+      });
+    }
+
+    if (!business) {
+      return res.status(404).json({ error: 'Website not found. Make sure you have created a website first.' });
+    }
+
+    // For dev: return business data regardless of publish status
+    // Generate templates (same as template endpoint)
+    const templates = [
+      { 
+        id: 'modern',
+        name: 'Modern & Minimal',
+        description: 'Clean, contemporary design with focus on content',
+        style: { bgColor: '#ffffff', textColor: '#1a1a1a', accent: '#f724de', secondary: '#f0f0f0', font: 'Inter, -apple-system, sans-serif' }
+      },
+      { 
+        id: 'creative',
+        name: 'Creative Portfolio',
+        description: 'Artistic layout perfect for creatives and portfolios',
+        style: { bgColor: '#faf8f3', textColor: '#2d2d2d', accent: '#f724de', secondary: '#e8e4d8', font: 'Poppins, -apple-system, sans-serif' }
+      },
+      { 
+        id: 'minimal',
+        name: 'Minimal & Professional',
+        description: 'Elegant minimalist design for professional services',
+        style: { bgColor: '#f9f7f4', textColor: '#3a3a3a', accent: '#8b5cf6', secondary: '#e5e0d8', font: 'Georgia, serif' }
+      },
+      {
+        id: 'bold',
+        name: 'Bold & Dynamic',
+        description: 'High-impact design that demands attention',
+        style: { bgColor: '#1a1a1a', textColor: '#ffffff', accent: '#f724de', secondary: '#333333', font: 'Montserrat, -apple-system, sans-serif' }
+      },
+      {
+        id: 'sleek',
+        name: 'Sleek & Dark',
+        description: 'Modern tech-forward design with premium feel',
+        style: { bgColor: '#0f1419', textColor: '#e2e8f0', accent: '#a78bfa', secondary: '#1e293b', font: 'Ubuntu, -apple-system, sans-serif' }
+      },
+    ];
+
+    let recommended = templates[0];
+    const businessType = (business.description || '').toLowerCase();
+    if (businessType.includes('salon') || businessType.includes('spa')) {
+      recommended = templates.find(t => t.id === 'minimal') || templates[0];
+    } else if (businessType.includes('consultant') || businessType.includes('agency')) {
+      recommended = templates.find(t => t.id === 'modern') || templates[0];
+    } else if (businessType.includes('artist') || businessType.includes('creative')) {
+      recommended = templates.find(t => t.id === 'creative') || templates[0];
+    }
+
+    res.json({
+      business,
+      template: templates[0],
+      templates,
+      recommended,
+      businessType,
+      analysis: business.analysis || {},
+      testimonials: [],
+      branding: business.branding || {},
+      leadForm: {
+        title: `Get in touch with ${business.name}`,
+        fields: ['name', 'email', 'company', 'message'],
+      },
+      bookingForm: {
+        enabled: true,
+      }
+    });
+  } catch (err) {
+    console.error('Dev preview fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch preview' });
   }
 });
 
@@ -2460,7 +3316,7 @@ app.post('/businesses/:businessId/team/invite', authenticateToken, async (req: A
     });
 
     // Send invitation email
-    const inviteLink = `${process.env.FRONTEND_URL || 'http://localhost:3003'}/join-team?token=${Buffer.from(`${team.id}:${email}`).toString('base64')}`;
+    const inviteLink = `${process.env.FRONTEND_URL || 'http://localhost:3002'}/join-team?token=${Buffer.from(`${team.id}:${email}`).toString('base64')}`;
     if (transporter) {
       await transporter.sendMail({
         to: email,
@@ -2689,12 +3545,230 @@ app.post('/businesses/:businessId/payments', authenticateToken, async (req: Auth
   }
 });
 
-// Attach Sentry error handler (must be after all routes but before listen)
-try {
-  attachSentryErrorHandler(app);
-} catch (err) {
-  logger.warn('Failed to attach Sentry error handler', { error: String(err) });
+// --- PHASE 5: Website Creation Endpoints ---
+
+// Get questionnaire questions for website builder
+app.post('/websites/questionnaire', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const questions = [
+      {
+        id: 1,
+        category: 'businessType',
+        question: 'What type of business are you?',
+        type: 'select',
+        options: ['E-commerce', 'Services', 'SaaS', 'Freelancer', 'Agency', 'Other']
+      },
+      {
+        id: 2,
+        category: 'businessName',
+        question: 'What is your business name?',
+        type: 'text',
+        placeholder: 'E.g., Acme Consulting'
+      },
+      {
+        id: 3,
+        category: 'industry',
+        question: 'What industry are you in?',
+        type: 'text',
+        placeholder: 'E.g., Digital Marketing'
+      },
+      {
+        id: 4,
+        category: 'primaryGoal',
+        question: 'What is your primary goal?',
+        type: 'select',
+        options: ['Generate Leads', 'Make Sales', 'Build Brand', 'Get Bookings', 'Get Inquiries']
+      },
+      {
+        id: 5,
+        category: 'targetAudience',
+        question: 'Describe your target audience',
+        type: 'text',
+        placeholder: 'E.g., Small business owners aged 25-45'
+      },
+      {
+        id: 6,
+        category: 'uniqueValue',
+        question: 'What makes you unique?',
+        type: 'text',
+        placeholder: 'E.g., 10 years of experience, affordable prices'
+      },
+      {
+        id: 7,
+        category: 'desiredFeatures',
+        question: 'Which features do you want?',
+        type: 'checkbox',
+        options: ['Contact Form', 'Online Booking', 'Blog', 'Testimonials', 'Gallery', 'Pricing Table', 'Live Chat']
+      },
+      {
+        id: 8,
+        category: 'budget',
+        question: 'What is your budget?',
+        type: 'select',
+        options: ['Under $500', '$500 - $1000', '$1000 - $5000', '$5000+', 'Not sure']
+      }
+    ];
+
+    res.json({ questions });
+  } catch (err) {
+    console.error('Get questionnaire error:', err);
+    res.status(500).json({ error: 'Failed to load questions' });
+  }
+});
+
+// Submit questionnaire answers and create website
+app.post('/websites/questionnaire/submit', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { answers } = req.body;
+    const userId = req.userId!;
+
+    if (!answers || typeof answers !== 'object') {
+      return res.status(400).json({ error: 'Answers are required' });
+    }
+
+    // Find or create business from answers
+    const businessName = answers.businessName || 'My Business';
+    const description = `${answers.uniqueValue || ''} - Primary goal: ${answers.primaryGoal || ''}`;
+
+    const business = await prisma.business.create({
+      data: {
+        userId,
+        name: businessName,
+        url: `https://temp-${Date.now()}.example.com`,
+        description,
+        phone: answers.phone || undefined,
+        address: answers.address || undefined,
+        analysis: {
+          questionnaire: answers,
+          generatedAt: new Date(),
+        },
+      },
+    });
+
+    // Generate AI recommendation based on answers
+    const recommendation = {
+      suggestedPageTypes: generateSuggestedPages(answers),
+      suggestedFeatures: answers.desiredFeatures || [],
+      insights: generateInsights(answers),
+      estimatedTimeframe: '3-5 days',
+      estimatedCost: estimateCost(answers.budget),
+    };
+
+    res.json({
+      businessId: business.id,
+      recommendation,
+      message: 'Website creation started! Check your email for next steps.'
+    });
+  } catch (err) {
+    console.error('Submit questionnaire error:', err);
+    res.status(500).json({ error: 'Failed to create website' });
+  }
+});
+
+// Send message to AI chat for website inquiry
+app.post('/websites/chat', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { message, sessionId, businessId } = req.body;
+    const userId = req.userId!;
+
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // Simple AI response generation (can be replaced with actual LLM like OpenAI)
+    const aiResponse = generateChatResponse(message);
+
+    // Store chat history in analytics for future reference
+    if (businessId) {
+      await prisma.analytics.create({
+        data: {
+          businessId,
+          eventType: 'website_chat_message',
+          eventData: {
+            sessionId,
+            userMessage: message,
+            aiResponse,
+            timestamp: new Date(),
+          },
+        },
+      }).catch(() => {
+        // Silently fail if no business ID yet
+      });
+    }
+
+    res.json({
+      response: aiResponse,
+      sessionId: sessionId || `session_${Date.now()}`,
+    });
+  } catch (err) {
+    console.error('Chat error:', err);
+    res.status(500).json({ error: 'Failed to process message' });
+  }
+});
+
+// Helper functions
+function generateSuggestedPages(answers: any): string[] {
+  const pages = ['Home', 'About', 'Services/Products'];
+  if (answers.primaryGoal === 'Generate Leads') pages.push('Contact', 'Lead Magnet');
+  if (answers.primaryGoal === 'Make Sales') pages.push('Shop', 'Checkout');
+  if (answers.primaryGoal === 'Get Bookings') pages.push('Booking', 'Calendar');
+  if (answers.businessType === 'SaaS') pages.push('Pricing', 'Features');
+  return pages;
 }
+
+function generateInsights(answers: any): string[] {
+  const insights: string[] = [];
+  if (answers.desiredFeatures?.includes('Contact Form')) {
+    insights.push('✓ Contact form integration will help capture leads automatically');
+  }
+  if (answers.primaryGoal === 'Make Sales') {
+    insights.push('✓ Add social proof testimonials to increase conversion rates');
+  }
+  if (answers.targetAudience) {
+    insights.push(`✓ Optimizing for your audience: ${answers.targetAudience}`);
+  }
+  if (!insights.length) {
+    insights.push('✓ Mobile-optimized design for all devices');
+    insights.push('✓ Fast loading speeds for better user experience');
+  }
+  return insights;
+}
+
+function estimateCost(budget: string): string {
+  const budgetMap: { [key: string]: string } = {
+    'Under $500': '$299/month',
+    '$500 - $1000': '$499/month',
+    '$1000 - $5000': '$799/month',
+    '$5000+': 'Custom pricing',
+    'Not sure': '$399/month (recommended)',
+  };
+  return budgetMap[budget] || '$399/month';
+}
+
+function generateChatResponse(message: string): string {
+  const lowerMessage = message.toLowerCase();
+  
+  if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
+    return "Hi there! 👋 I'm your AI assistant. I'll help you build the perfect website for your business. What type of business do you run?";
+  }
+  if (lowerMessage.includes('price') || lowerMessage.includes('cost')) {
+    return "Our website builder starts at $299/month for basic sites. For more complex businesses, we have flexible plans up to $5000+. What's your budget range?";
+  }
+  if (lowerMessage.includes('feature') || lowerMessage.includes('feature')) {
+    return "We offer many features: contact forms, booking systems, blogs, galleries, live chat, and more! Which features are most important for your business?";
+  }
+  if (lowerMessage.includes('how long') || lowerMessage.includes('timeline')) {
+    return "Most websites are ready in 3-5 days. Complex custom builds may take 1-2 weeks. When do you need your site live?";
+  }
+  if (lowerMessage.includes('lead') || lowerMessage.includes('sales')) {
+    return "Great! We can integrate lead capture forms, email sequences, and analytics to track your results. Tell me more about your business model?";
+  }
+  
+  // Default response
+  return "That's interesting! Tell me more about your business and what you're hoping to achieve with your website. 🚀";
+}
+
+// Sentry removed: no error handler attached here
 
 // --- Server Startup ---
 const server = app.listen(PORT, () => {

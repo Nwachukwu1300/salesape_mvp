@@ -207,7 +207,6 @@ function generateLeadQuestions(description: string): string[] {
   const questions = {
     Landscaping: [
       'What is the size of your garden or outdoor space?',
-      'What is your budget for this project?',
       'When would you like to start?',
     ],
     Photography: [
@@ -232,7 +231,7 @@ function generateLeadQuestions(description: string): string[] {
     ],
     Marketing: [
       'What are your marketing goals?',
-      'What is your current budget?',
+      'What channels have you tried?',
       'What platforms do you want to focus on?',
     ],
   };
@@ -240,7 +239,6 @@ function generateLeadQuestions(description: string): string[] {
   return (
     questions[industry as keyof typeof questions] || [
       'What are your main needs?',
-      'What is your budget?',
       'When do you need this completed?',
     ]
   );

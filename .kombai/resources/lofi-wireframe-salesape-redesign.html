@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Salesape MVP - Redesigned Layout</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Comic Sans MS', cursive;
+      background: #f5f5f5;
+      color: #333;
+      padding: 20px;
+    }
+    
+    .wireframe-title {
+      text-align: center;
+      margin-bottom: 30px;
+      padding-bottom: 20px;
+      border-bottom: 3px solid #333;
+    }
+    
+    .wireframe-title h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+    }
+    
+    .wireframe-title p {
+      font-size: 14px;
+      color: #666;
+    }
+    
+    .app-layout {
+      display: flex;
+      gap: 0;
+      background: white;
+      border: 3px solid #333;
+      min-height: 600px;
+    }
+    
+    /* Sidebar */
+    .sidebar {
+      width: 240px;
+      background: #fff;
+      border-right: 3px solid #333;
+      padding: 20px;
+      flex-shrink: 0;
+    }
+    
+    .logo-area {
+      padding: 10px;
+      border: 2px solid #666;
+      background: #f9f9f9;
+      text-align: center;
+      margin-bottom: 30px;
+      position: relative;
+    }
+    
+    .nav-section {
+      margin-bottom: 30px;
+      position: relative;
+    }
+    
+    .nav-section h3 {
+      font-size: 12px;
+      color: #999;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      letter-spacing: 1px;
+    }
+    
+    .nav-item {
+      padding: 12px 16px;
+      margin-bottom: 4px;
+      border: 2px solid #ccc;
+      background: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: relative;
+    }
+    
+    .nav-item.active {
+      background: #f0f0f0;
+      border-color: #333;
+      font-weight: bold;
+    }
+    
+    .nav-item .icon-box {
+      width: 20px;
+      height: 20px;
+      border: 2px solid #666;
+      background: #e0e0e0;
+      flex-shrink: 0;
+    }
+    
+    .user-section {
+      margin-top: auto;
+      padding-top: 20px;
+      border-top: 2px solid #ccc;
+      position: relative;
+    }
+    
+    .user-profile {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border: 2px solid #ccc;
+      background: #f9f9f9;
+    }
+    
+    .user-avatar {
+      width: 40px;
+      height: 40px;
+      border: 2px solid #666;
+      background: #e0e0e0;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    
+    /* Main Content */
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .top-bar {
+      padding: 20px 30px;
+      border-bottom: 3px solid #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #fff;
+      position: relative;
+    }
+    
+    .breadcrumbs {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 14px;
+      color: #666;
+    }
+    
+    .search-bar {
+      width: 300px;
+      padding: 10px 15px;
+      border: 2px solid #999;
+      background: #f9f9f9;
+    }
+    
+    .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    
+    .icon-btn {
+      width: 40px;
+      height: 40px;
+      border: 2px solid #666;
+      background: #f0f0f0;
+      cursor: pointer;
+      position: relative;
+    }
+    
+    .icon-btn .badge {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #000;
+      color: white;
+      font-size: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #fff;
+    }
+    
+    .content-area {
+      flex: 1;
+      padding: 30px;
+      overflow-y: auto;
+    }
+    
+    .page-header {
+      margin-bottom: 30px;
+      position: relative;
+    }
+    
+    .page-header h1 {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+    
+    .page-header p {
+      color: #666;
+      font-size: 14px;
+    }
+    
+    /* Stats Cards */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+      position: relative;
+    }
+    
+    .stat-card {
+      padding: 20px;
+      border: 3px solid #333;
+      background: #fff;
+      position: relative;
+    }
+    
+    .stat-label {
+      font-size: 12px;
+      color: #999;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    
+    .stat-value {
+      font-size: 36px;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+    
+    .stat-change {
+      font-size: 12px;
+      color: #666;
+    }
+    
+    /* Action Card */
+    .action-card {
+      padding: 25px;
+      border: 3px solid #333;
+      background: #fff;
+      margin-bottom: 30px;
+      position: relative;
+    }
+    
+    .action-card h2 {
+      font-size: 20px;
+      margin-bottom: 15px;
+    }
+    
+    .form-row {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+    
+    .input-field {
+      flex: 1;
+      padding: 12px 15px;
+      border: 2px solid #999;
+      background: #f9f9f9;
+      font-family: 'Comic Sans MS', cursive;
+    }
+    
+    .btn {
+      padding: 12px 24px;
+      border: 3px solid #333;
+      background: #000;
+      color: #fff;
+      font-family: 'Comic Sans MS', cursive;
+      font-weight: bold;
+      cursor: pointer;
+      position: relative;
+    }
+    
+    .btn-secondary {
+      background: #fff;
+      color: #000;
+    }
+    
+    /* Results Section */
+    .results-section {
+      position: relative;
+    }
+    
+    .results-section h3 {
+      font-size: 18px;
+      margin-bottom: 20px;
+    }
+    
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .metric-circle {
+      text-align: center;
+      position: relative;
+    }
+    
+    .circle {
+      width: 100px;
+      height: 100px;
+      border: 3px solid #333;
+      border-radius: 50%;
+      margin: 0 auto 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: bold;
+      background: #f0f0f0;
+    }
+    
+    .metric-label {
+      font-size: 12px;
+      color: #666;
+    }
+    
+    .data-table {
+      width: 100%;
+      border: 3px solid #333;
+      border-collapse: collapse;
+      background: #fff;
+      position: relative;
+    }
+    
+    .data-table th,
+    .data-table td {
+      padding: 12px 15px;
+      border: 2px solid #999;
+      text-align: left;
+    }
+    
+    .data-table th {
+      background: #f0f0f0;
+      font-weight: bold;
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+    
+    .data-table tr:nth-child(even) {
+      background: #f9f9f9;
+    }
+    
+    .component-tag {
+      position: absolute;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-family: Arial, sans-serif;
+      font-weight: bold;
+      z-index: 10;
+      white-space: nowrap;
+    }
+    
+    .tag-reuse {
+      background: #4CAF50;
+      color: white;
+      top: 4px;
+      right: 4px;
+    }
+    
+    .tag-new {
+      background: #FF9800;
+      color: white;
+      top: 4px;
+      right: 4px;
+    }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+      .app-layout {
+        flex-direction: column;
+      }
+      
+      .sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 3px solid #333;
+      }
+      
+      .top-bar {
+        flex-direction: column;
+        gap: 15px;
+        align-items: stretch;
+      }
+      
+      .search-bar {
+        width: 100%;
+      }
+      
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wireframe-title">
+    <h1>Salesape MVP - Unified App Layout</h1>
+    <p>Redesigned layout with persistent navigation, consistent component usage, and improved UX</p>
+  </div>
+  
+  <div class="app-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <!-- REUSABLE: Logo from app/frontend/components/Logo.tsx -->
+      <div style="position: relative;">
+        <span class="component-tag tag-reuse" title="app/frontend/components/Logo.tsx">[REUSE] Logo</span>
+        <div class="logo-area">
+          <strong>SALESAPE</strong><br>
+          <small>MVP</small>
+        </div>
+      </div>
+      
+      <nav>
+        <div class="nav-section">
+          <h3>Main</h3>
+          <!-- REUSABLE: Navigation items using existing patterns -->
+          <div style="position: relative;">
+            <span class="component-tag tag-reuse" title="Standard nav pattern">[REUSE] Nav Item</span>
+            <div class="nav-item active">
+              <div class="icon-box"></div>
+              <span>Dashboard</span>
+            </div>
+          </div>
+          <div class="nav-item">
+            <div class="icon-box"></div>
+            <span>Websites</span>
+          </div>
+          <div class="nav-item">
+            <div class="icon-box"></div>
+            <span>SEO Audits</span>
+          </div>
+        </div>
+        
+        <div class="nav-section">
+          <h3>Tools</h3>
+          <div class="nav-item">
+            <div class="icon-box"></div>
+            <span>Create Website</span>
+          </div>
+          <div class="nav-item">
+            <div class="icon-box"></div>
+            <span>Run Audit</span>
+          </div>
+          <div class="nav-item">
+            <div class="icon-box"></div>
+            <span>Generate Config</span>
+          </div>
+        </div>
+        
+        <div class="nav-section">
+          <h3>Account</h3>
+          <div class="nav-item">
+            <div class="icon-box"></div>
+            <span>Settings</span>
+          </div>
+          <div class="nav-item">
+            <div class="icon-box"></div>
+            <span>Help & Support</span>
+          </div>
+        </div>
+      </nav>
+      
+      <!-- NEW COMPONENT: ThemeToggle (to be created or imported from figma-export) -->
+      <div style="position: relative; margin-top: 20px;">
+        <span class="component-tag tag-reuse" title="figma-export/src/components/ThemeToggle.tsx">[REUSE] ThemeToggle</span>
+        <div style="padding: 10px; border: 2px solid #ccc; text-align: center;">
+          <span>🌙 Dark Mode Toggle</span>
+        </div>
+      </div>
+      
+      <div class="user-section">
+        <div class="user-profile">
+          <div class="user-avatar"></div>
+          <div>
+            <strong>Jane Doe</strong><br>
+            <small style="color: #999;">you@business.com</small>
+          </div>
+        </div>
+      </div>
+    </aside>
+    
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top Bar -->
+      <header class="top-bar">
+        <div>
+          <!-- NEW COMPONENT: Breadcrumbs (to be created) -->
+          <div style="position: relative; display: inline-block;">
+            <span class="component-tag tag-new" title="To be created at app/frontend/components/Breadcrumbs.tsx">[NEW] Breadcrumbs</span>
+            <div class="breadcrumbs">
+              <span>Home</span> <span>/</span> <span style="font-weight: bold;">Dashboard</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="actions">
+          <!-- REUSABLE: Input component for search -->
+          <div style="position: relative;">
+            <span class="component-tag tag-reuse" title="app/frontend/components/Input.tsx">[REUSE] Input</span>
+            <input class="search-bar" placeholder="Search...">
+          </div>
+          
+          <!-- NEW COMPONENT: NotificationButton (to be created) -->
+          <div style="position: relative;">
+            <span class="component-tag tag-new" title="To be created at app/frontend/components/NotificationButton.tsx">[NEW] NotificationBtn</span>
+            <button class="icon-btn">
+              🔔
+              <span class="badge">3</span>
+            </button>
+          </div>
+          
+          <button class="icon-btn">⚙️</button>
+        </div>
+      </header>
+      
+      <!-- Page Content -->
+      <div class="content-area">
+        <div class="page-header">
+          <h1>Dashboard</h1>
+          <p>Overview of your websites, leads, and recent activity</p>
+        </div>
+        
+        <!-- Stats Section -->
+        <!-- REUSABLE: StatCard from figma-export -->
+        <div style="position: relative;">
+          <span class="component-tag tag-reuse" title="figma-export/src/components/StatCard.tsx">[REUSE] StatCard</span>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Total Websites</div>
+              <div class="stat-value">24</div>
+              <div class="stat-change">↑ 12% from last month</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Active Leads</div>
+              <div class="stat-value">156</div>
+              <div class="stat-change">↑ 8% from last month</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Bookings</div>
+              <div class="stat-value">42</div>
+              <div class="stat-change">↑ 23% from last month</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Conversion Rate</div>
+              <div class="stat-value">26.9%</div>
+              <div class="stat-change">↑ 4% from last month</div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Quick Action: Run SEO Audit -->
+        <!-- REUSABLE: Card component -->
+        <div style="position: relative;">
+          <span class="component-tag tag-reuse" title="app/frontend/components/Card.tsx">[REUSE] Card</span>
+          <div class="action-card">
+            <h2>Run SEO Audit</h2>
+            <p style="color: #666; margin-bottom: 20px; font-size: 14px;">Analyze any website's SEO performance, accessibility, and best practices</p>
+            
+            <div class="form-row">
+              <!-- REUSABLE: Input component -->
+              <div style="position: relative; flex: 1;">
+                <span class="component-tag tag-reuse" title="app/frontend/components/Input.tsx">[REUSE] Input</span>
+                <input class="input-field" placeholder="https://example.com">
+              </div>
+              
+              <!-- REUSABLE: Button component -->
+              <div style="position: relative;">
+                <span class="component-tag tag-reuse" title="app/frontend/components/Button.tsx">[REUSE] Button</span>
+                <button class="btn">Run Audit</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Results Section -->
+        <div class="results-section">
+          <h3>Latest Audit Results</h3>
+          
+          <!-- REUSABLE: ProgressCircle component -->
+          <div style="position: relative;">
+            <span class="component-tag tag-reuse" title="app/frontend/components/ProgressCircle.tsx">[REUSE] ProgressCircle</span>
+            <div class="metrics-grid">
+              <div class="metric-circle">
+                <div class="circle">89</div>
+                <div class="metric-label">Performance</div>
+              </div>
+              <div class="metric-circle">
+                <div class="circle">92</div>
+                <div class="metric-label">SEO</div>
+              </div>
+              <div class="metric-circle">
+                <div class="circle">78</div>
+                <div class="metric-label">Accessibility</div>
+              </div>
+              <div class="metric-circle">
+                <div class="circle">85</div>
+                <div class="metric-label">Best Practices</div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Recent Activity Table -->
+          <!-- NEW COMPONENT: DataTable (to be created or use shadcn Table) -->
+          <div style="position: relative; margin-top: 30px;">
+            <span class="component-tag tag-new" title="To be created using shadcn Table component">[NEW] DataTable</span>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Website</th>
+                  <th>Last Audit</th>
+                  <th>Score</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>example.com</td>
+                  <td>2 hours ago</td>
+                  <td><strong>89/100</strong></td>
+                  <td>
+                    <!-- REUSABLE: Badge component -->
+                    <div style="display: inline-block; position: relative;">
+                      <span class="component-tag tag-reuse" title="app/frontend/components/Badge.tsx" style="top: -20px;">[REUSE] Badge</span>
+                      <span style="padding: 4px 8px; border: 2px solid #333; background: #f0f0f0; font-size: 11px;">Active</span>
+                    </div>
+                  </td>
+                  <td>
+                    <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;">View Report</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td>mystore.com</td>
+                  <td>1 day ago</td>
+                  <td><strong>76/100</strong></td>
+                  <td>
+                    <span style="padding: 4px 8px; border: 2px solid #333; background: #f0f0f0; font-size: 11px;">Needs Review</span>
+                  </td>
+                  <td>
+                    <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;">View Report</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td>shoplocal.com</td>
+                  <td>3 days ago</td>
+                  <td><strong>92/100</strong></td>
+                  <td>
+                    <span style="padding: 4px 8px; border: 2px solid #333; background: #f0f0f0; font-size: 11px;">Excellent</span>
+                  </td>
+                  <td>
+                    <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;">View Report</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+  
+  <div style="margin-top: 30px; padding: 20px; border: 3px solid #666; background: #f9f9f9;">
+    <h3 style="margin-bottom: 15px;">Key Improvements in This Redesign:</h3>
+    <ul style="line-height: 1.8; padding-left: 20px;">
+      <li><strong>Unified Navigation:</strong> Persistent sidebar navigation across all pages for better orientation</li>
+      <li><strong>Component Reuse:</strong> Tagged components show which existing components are reused vs. new ones needed</li>
+      <li><strong>Information Hierarchy:</strong> Clear page headers, breadcrumbs, and section organization</li>
+      <li><strong>Consistent Layout:</strong> Top bar with search, notifications, and settings in every view</li>
+      <li><strong>Better Stats Display:</strong> Uses existing StatCard component from figma-export</li>
+      <li><strong>Responsive Design:</strong> Layout adapts to mobile with collapsible sidebar</li>
+      <li><strong>Accessibility:</strong> Proper structure for screen readers, keyboard navigation support</li>
+      <li><strong>User Context:</strong> Always shows logged-in user info and provides quick access to account</li>
+      <li><strong>Action-Oriented:</strong> Primary actions are clearly visible and accessible</li>
+      <li><strong>Data Tables:</strong> Proper table structure for audit results instead of raw JSON display</li>
+    </ul>
+  </div>
+</body>
+</html>
