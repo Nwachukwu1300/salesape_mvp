@@ -21,6 +21,7 @@ model User {
   refreshToken String?
   businesses Business[]
   teamMemberships TeamMember[]
+  conversationSessions ConversationSession[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 }
@@ -262,5 +263,36 @@ model CalendarBooking {
   startTime  DateTime
   endTime    DateTime
   createdAt  DateTime @default(now())
+}
+
+model PublicSeoAudit {
+  id        String   @id @default(cuid())
+  url       String
+  email     String   // Email of person requesting audit
+  ipAddress String   // IP address for rate limiting (1 per week)
+  performance Int
+  seo        Int
+  mobile     Int
+  overallScore Int
+  issues     Json?
+  recommendations Json?
+  raw        Json?
+  createdAt  DateTime @default(now())
+
+  @@index([ipAddress, createdAt])
+  @@index([email, createdAt])
+}
+
+model ConversationSession {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  Json     // Array of { role: "user" | "assistant", content: string, timestamp: DateTime }
+  extracted Json?    // Extracted BusinessUnderstanding that matches schema
+  status    String   @default("active")  // active, completed, abandoned
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
 }
 

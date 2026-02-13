@@ -64,3 +64,44 @@ export const publicLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+/**
+ * Public SEO Audit rate limiter - 1 per week per IP address
+ */
+export const publicSeoAuditLimiter = rateLimit({
+  windowMs: 7 * 24 * 60 * 60 * 1000, // 7 days (1 week)
+  max: 1, // Limit each IP to 1 request per week
+  message: 'You can run one free SEO audit per week. Please try again next week.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Don't skip any requests - all requests count toward the limit
+    return false;
+  },
+});
+
+/**
+ * Conversation rate limiter - protect onboarding flow from abuse
+ * Limit to 35 messages per hour per user
+ */
+export const conversationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 35, // Limit each user to 35 messages per hour
+  message: 'Too many conversation messages. Please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Rate limit by user ID from JWT token, fallback to IP
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        // For rate limiting purposes, we'll use the Authorization header as a key
+        // In a real scenario, you'd extract and use the actual user ID
+        return authHeader.replace(/^Bearer\s+/i, '').substring(0, 20);
+      } catch (e) {
+        return req.ip || 'unknown';
+      }
+    }
+    return req.ip || 'unknown';
+  },
+});

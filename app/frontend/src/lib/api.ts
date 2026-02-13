@@ -55,11 +55,40 @@ export async function sendWebsiteChatMessage(businessId: string, message: string
   return resp.data;
 }
 
-export async function health() {
-  try {
-    const resp = await client.get('/health');
-    return resp.data;
-  } catch (err) {
-    return { status: 'error', db: 'disconnected' };
-  }
+export async function saveBusinessUnderstanding(businessId: string, businessUnderstanding: any) {
+  const resp = await client.post('/businesses/save-business-understanding', {
+    businessId,
+    businessUnderstanding,
+  });
+  return resp.data;
 }
+
+// ============================================================================
+// CONVERSATION ONBOARDING API
+// ============================================================================
+
+export async function startConversation() {
+  const resp = await client.post('/conversation/start', {});
+  return resp.data;
+}
+
+export async function sendConversationMessage(sessionId: string, message: string) {
+  const resp = await client.post('/conversation/message', {
+    sessionId,
+    message,
+  });
+  return resp.data;
+}
+
+export async function getConversationSession(sessionId: string) {
+  const resp = await client.get(`/conversation/session/${sessionId}`);
+  return resp.data;
+}
+
+export async function completeConversation(sessionId: string, businessId: string) {
+  const resp = await client.post(`/conversation/session/${sessionId}/complete`, {
+    businessId,
+  });
+  return resp.data;
+}
+

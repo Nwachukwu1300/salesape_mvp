@@ -18,14 +18,29 @@ import crypto from 'crypto';
 // Import new utilities and middleware
 import { logger, requestLogger } from './utils/logger.js';
 import { encryptData, decryptData, isEncrypted, getDecryptedValue } from './utils/encryption.js';
-import { generateBusinessIntelligence, calculateLeadScore } from './utils/ai-intelligence.js';
+import { generateBusinessIntelligence, generateStructuredBusinessUnderstanding, calculateLeadScore } from './utils/ai-intelligence.js';
 import { 
   scrapeInstagramProfile, 
   extractContactFromBio, 
   instagramProfileToBusinessData,
   generateInstagramCaption 
 } from './utils/instagram-scraper.js';
-import { validateBusinessUnderstanding, deterministicStringifyBusiness } from './utils/business-understanding.js';
+import { 
+  validateBusinessUnderstanding as validateBUStructure,
+  validateBusinessUnderstandingResponse,
+} from './utils/business-validation.js';
+import {
+  validateAIResponse,
+  extractJSONFromResponse,
+  ConversationMessage,
+} from './utils/conversation-schema.js';
+import {
+  getCurrentStage,
+  generateNextQuestion,
+  extractDataFromMessage,
+  isStageDataValid,
+  generateSummaryMessage,
+} from './utils/conversation-flow.js';
 import { 
   validationErrorHandler, 
   authValidation, 
@@ -41,6 +56,8 @@ import {
   apiLimiter,
   notificationLimiter,
   publicLimiter,
+  publicSeoAuditLimiter,
+  conversationLimiter,
 } from './middleware/rateLimiter.js';
 
 dotenv.config();
@@ -55,7 +72,9 @@ const prisma = new PrismaClient();
 
 // --- Middleware ---
 app.use(cors());
-app.use(express.json());
+// Limit request body size to 10MB to prevent abuse
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(requestLogger); // Request/response logging
 app.use(globalLimiter); // Global rate limiting
 
@@ -437,6 +456,133 @@ app.post('/seo-audit', authenticateToken, async (req: AuthRequest, res: Response
   }
 });
 
+// --- Public SEO Audit Endpoint (no auth, 1 per week per IP) ---
+app.post('/seo-audit-public', publicSeoAuditLimiter, async (req: Request, res: Response) => {
+  try {
+    const { website, email } = req.body;
+
+    // Validate inputs
+    if (!website || typeof website !== 'string') {
+      return res.status(400).json({ error: 'Website URL is required' });
+    }
+
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Validate website length (prevent abuse with extremely long URLs)
+    const trimmedWebsite = website.trim();
+    if (trimmedWebsite.length > 500) {
+      return res.status(400).json({ error: 'Website URL is too long' });
+    }
+
+    // Trim and validate email length
+    const trimmedEmail = email.trim();
+    if (trimmedEmail.length > 254) {
+      return res.status(400).json({ error: 'Email is too long' });
+    }
+
+    // Enhanced email validation (RFC 5322 simplified)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      return res.status(400).json({ error: 'Valid email is required' });
+    }
+
+    // Additional email validation to prevent common abuse patterns
+    if (trimmedEmail.includes('..') || trimmedEmail.startsWith('.') || trimmedEmail.endsWith('.')) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    // Normalize URL: add https:// if no protocol is specified
+    let normalizedUrl = trimmedWebsite;
+    if (normalizedUrl && !normalizedUrl.match(/^https?:\/\//)) {
+      normalizedUrl = `https://${normalizedUrl}`;
+    }
+
+    // Basic URL validation
+    try {
+      const urlObj = new URL(normalizedUrl);
+      
+      // Prevent localhost and private IP addresses
+      const hostname = urlObj.hostname.toLowerCase();
+      if (
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname === '0.0.0.0' ||
+        hostname.startsWith('192.168.') ||
+        hostname.startsWith('10.') ||
+        hostname.startsWith('172.') ||
+        hostname === 'example.com' ||
+        hostname === 'example.org'
+      ) {
+        return res.status(400).json({ error: 'Invalid website URL' });
+      }
+    } catch {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    // Get client IP for rate limiting tracking
+    const clientIp = (req.ip || req.socket.remoteAddress || 'unknown').toString();
+
+    // Run scraping + PageSpeed
+    const scraped = await (async () => { try { return await scrapeWebsite(normalizedUrl); } catch { return {}; } })();
+    const pageSpeed = await fetchPageSpeedData(normalizedUrl);
+
+    const performance = pageSpeed?.performance ? Math.round(pageSpeed.performance * 100) : 0;
+    const seoScore = pageSpeed?.seo ? Math.round(pageSpeed.seo * 100) : 0;
+    const accessibility = pageSpeed?.accessibility ? Math.round(pageSpeed.accessibility * 100) : 0;
+    const mobile = Math.round((performance + accessibility) / 2); // Mobile score = avg of performance and accessibility
+
+    const bestPractices = calculateSeoScore({ pageSpeed });
+
+    // Issues/opportunities - simple extraction from audits
+    const issues: any = { critical: [], warnings: [], opportunities: [] };
+    if (!scraped || Object.keys(scraped).length === 0) issues.warnings.push('Failed to scrape site content');
+    if (performance < 40) issues.critical.push('Low performance score');
+    if (seoScore < 50) issues.warnings.push('SEO score is low');
+    if (mobile < 50) issues.warnings.push('Mobile experience needs improvement');
+
+    const recommendations = generateAuditRecommendations({ seoKeywords: scraped.headings || [], heroHeadline: scraped.title || '' });
+
+    // Calculate overall score
+    const overallScore = Math.round((performance + seoScore + mobile) / 3);
+
+    // Create public audit record
+    const audit = await prisma.publicSeoAudit.create({
+      data: {
+        url: normalizedUrl,
+        email,
+        ipAddress: clientIp,
+        performance,
+        seo: seoScore,
+        mobile,
+        overallScore,
+        issues,
+        recommendations,
+        raw: { pageSpeed, scraped },
+      },
+    });
+
+    // Build response
+    const auditResponse = {
+      id: audit.id,
+      url: audit.url,
+      overallScore: audit.overallScore,
+      seoScore: audit.seo,
+      performanceScore: audit.performance,
+      mobileScore: audit.mobile,
+      issues: Array.isArray(audit.issues?.critical) ? audit.issues.critical : [],
+      recommendations: Array.isArray(audit.recommendations) ? audit.recommendations : [],
+      createdAt: audit.createdAt,
+    };
+
+    res.json(auditResponse);
+  } catch (err) {
+    logger.error('Public SEO audit error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to run SEO audit' });
+  }
+});
+
 // --- Free Audit Proxy (unauthenticated, IP-limited, optional CAPTCHA) ---
 app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
   try {
@@ -551,6 +697,321 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('Free audit error', { error: String(err) });
     res.status(500).json({ error: 'Failed to run free audit' });
+  }
+});
+
+// ============================================================================
+// CONVERSATION ONBOARDING ENDPOINTS
+// ============================================================================
+
+// POST /conversation/start - Initialize a new conversation session
+app.post('/conversation/start', authenticateToken, conversationLimiter, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Create a new conversation session
+    const session = await prisma.conversationSession.create({
+      data: {
+        userId,
+        messages: [],
+        extracted: {},
+        status: 'active',
+      },
+    });
+
+    // Generate the first greeting question
+    const stage = getCurrentStage(undefined);
+    const assistantMessage = generateNextQuestion(stage);
+
+    // Add the assistant's first message to the session
+    const messages: ConversationMessage[] = [
+      {
+        role: 'assistant',
+        content: assistantMessage,
+        timestamp: new Date(),
+      },
+    ];
+
+    // Save the initial message
+    await prisma.conversationSession.update({
+      where: { id: session.id },
+      data: { messages: messages as any },
+    });
+
+    res.json({
+      sessionId: session.id,
+      messages,
+      stage,
+    });
+  } catch (err) {
+    logger.error('Conversation start error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to start conversation' });
+  }
+});
+
+// POST /conversation/message - Send a user message and get assistant response
+app.post('/conversation/message', authenticateToken, conversationLimiter, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { sessionId, message } = req.body;
+
+    // Validate sessionId
+    if (!sessionId || typeof sessionId !== 'string') {
+      return res.status(400).json({ error: 'Session ID is required' });
+    }
+
+    // Validate sessionId format (should be a UUID/CUID)
+    if (!/^[a-z0-9_\-]{15,40}$/.test(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID format' });
+    }
+
+    // Validate message presence and type
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    // Validate message length (min 1, max 1000 characters)
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.length === 0) {
+      return res.status(400).json({ error: 'Message cannot be empty' });
+    }
+
+    if (trimmedMessage.length > 1000) {
+      return res.status(400).json({ error: 'Message is too long (max 1000 characters)' });
+    }
+
+    // Get the session
+    const session = await prisma.conversationSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session || session.userId !== userId) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.status !== 'active') {
+      return res.status(400).json({ error: 'Conversation is not active' });
+    }
+
+    // Get current extracted data
+    let extracted = (session.extracted as any) || {};
+
+    // Get current stage
+    const currentStage = getCurrentStage(extracted);
+
+    // Validate and extract data from user message
+    const dataValidation = isStageDataValid(currentStage, { ...extracted });
+    
+    // If current stage data is invalid, ask again
+    let nextStage = currentStage;
+    if (!dataValidation.valid && currentStage !== 'greeting') {
+      const messages = [...(session.messages as any), {
+        role: 'user',
+        content: trimmedMessage,
+        timestamp: new Date(),
+      }, {
+        role: 'assistant',
+        content: dataValidation.message || 'Please provide a valid response. ' + generateNextQuestion(currentStage),
+        timestamp: new Date(),
+      }];
+
+      await prisma.conversationSession.update({
+        where: { id: sessionId },
+        data: { messages: messages as any },
+      });
+
+      return res.json({
+        sessionId,
+        messages,
+        stage: currentStage,
+        error: dataValidation.message,
+      });
+    }
+
+    // Extract data from valid user message
+    extracted = extractDataFromMessage(trimmedMessage, currentStage, extracted);
+
+    // Determine next stage
+    nextStage = getCurrentStage(extracted);
+
+    // Build assistant response
+    let assistantContent = '';
+    
+    if (nextStage === 'summary') {
+      // Onboarding complete - generate a summary message
+      assistantContent = generateSummaryMessage(extracted);
+    } else {
+      // Continue to next question
+      assistantContent = generateNextQuestion(nextStage);
+    }
+
+    // Build updated messages array
+    const messages = [...(session.messages as any), {
+      role: 'user',
+      content: trimmedMessage,
+      timestamp: new Date(),
+    }, {
+      role: 'assistant',
+      content: assistantContent,
+      timestamp: new Date(),
+    }];
+
+    // Validate extracted data with Zod schema
+    const validation = validateAIResponse(extracted);
+    let finalStatus = 'active';
+    let finalExtracted = extracted;
+
+    if (nextStage === 'summary' && validation.valid) {
+      finalStatus = 'completed';
+      finalExtracted = validation.data;
+    }
+
+    // Save updated session
+    await prisma.conversationSession.update({
+      where: { id: sessionId },
+      data: {
+        messages: messages as any,
+        extracted: finalExtracted as any,
+        status: finalStatus,
+      },
+    });
+
+    res.json({
+      sessionId,
+      messages,
+      stage: nextStage,
+      extracted: finalExtracted,
+      isComplete: finalStatus === 'completed',
+      validationErrors: validation.valid ? undefined : validation.errors,
+    });
+  } catch (err) {
+    logger.error('Conversation message error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to process message' });
+  }
+});
+
+// GET /conversation/session/:sessionId - Retrieve conversation session
+app.get('/conversation/session/:sessionId', authenticateToken, conversationLimiter, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { sessionId } = req.params;
+
+    // Validate sessionId format
+    if (!sessionId || !/^[a-z0-9_\-]{15,40}$/.test(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID format' });
+    }
+
+    const session = await prisma.conversationSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session || session.userId !== userId) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const stage = getCurrentStage((session.extracted as any) || {});
+
+    res.json({
+      sessionId: session.id,
+      messages: session.messages,
+      extracted: session.extracted,
+      stage,
+      status: session.status,
+      isComplete: session.status === 'completed',
+    });
+  } catch (err) {
+    logger.error('Get conversation error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to retrieve conversation' });
+  }
+});
+
+// POST /conversation/session/:sessionId/complete - Complete conversation and extract business
+app.post('/conversation/session/:sessionId/complete', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { sessionId } = req.params;
+    const { businessId } = req.body;
+
+    // Validate sessionId format
+    if (!sessionId || !/^[a-z0-9_\-]{15,40}$/.test(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID format' });
+    }
+
+    // Validate businessId presence and format
+    if (!businessId || typeof businessId !== 'string') {
+      return res.status(400).json({ error: 'Business ID is required' });
+    }
+
+    if (!/^[a-z0-9_\-]{15,40}$/.test(businessId)) {
+      return res.status(400).json({ error: 'Invalid business ID format' });
+    }
+
+    const session = await prisma.conversationSession.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session || session.userId !== userId) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Validate the extracted data
+    const validation = validateAIResponse(session.extracted);
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: 'Invalid business data',
+        details: validation.errors,
+      });
+    }
+
+    // Verify business ownership
+    const business = await prisma.business.findUnique({
+      where: { id: businessId },
+    });
+
+    if (!business || business.userId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    // Update business with extracted data
+    const analysis = (business.analysis as any) || {};
+    analysis.businessUnderstandingValidated = validation.data;
+
+    await prisma.business.update({
+      where: { id: businessId },
+      data: {
+        analysis: analysis as any,
+      },
+    });
+
+    // Mark conversation as completed
+    await prisma.conversationSession.update({
+      where: { id: sessionId },
+      data: { status: 'completed' },
+    });
+
+    res.json({
+      message: 'Business data extracted and saved',
+      businessId,
+      extracted: validation.data,
+    });
+  } catch (err) {
+    logger.error('Complete conversation error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to complete conversation' });
   }
 });
 
@@ -1345,6 +1806,64 @@ app.post('/generate-website-config', authenticateToken, async (req: AuthRequest,
   } catch (err) {
     logger.error('Generate website config error', { error: String(err) });
     res.status(500).json({ error: 'Failed to generate website config' });
+  }
+});
+
+// --- Save validated BusinessUnderstanding from recap screen ---
+app.post('/businesses/save-business-understanding', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId, businessUnderstanding } = req.body;
+    const userId = req.userId!;
+
+    if (!businessId || !businessUnderstanding) {
+      return res.status(400).json({ error: 'businessId and businessUnderstanding are required' });
+    }
+
+    // Verify business belongs to user
+    const business = await prisma.business.findUnique({
+      where: { id: businessId },
+    });
+
+    if (!business) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    if (business.userId !== userId) {
+      return res.status(403).json({ error: 'Not authorized to update this business' });
+    }
+
+    // Validate the structure
+    const validation = validateBUStructure(businessUnderstanding);
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: 'Invalid business understanding structure',
+        details: validation.errors,
+      });
+    }
+
+    // Save validated JSON to business.analysis
+    const updatedBusiness = await prisma.business.update({
+      where: { id: businessId },
+      data: {
+        analysis: {
+          ...((business.analysis as any) || {}),
+          businessUnderstandingValidated: businessUnderstanding,
+          validatedAt: new Date(),
+        },
+        name: businessUnderstanding.name, // Also update business name
+        description: businessUnderstanding.valueProposition,
+      },
+    });
+
+    res.json({
+      success: true,
+      businessId: updatedBusiness.id,
+      message: 'Business understanding saved successfully',
+      data: businessUnderstanding,
+    });
+  } catch (err) {
+    logger.error('Save business understanding error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to save business understanding' });
   }
 });
 

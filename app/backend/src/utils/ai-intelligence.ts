@@ -3,6 +3,9 @@
  * Extracts business profile, generates marketing copy, lead questions, SEO keywords
  */
 
+import type { BusinessUnderstanding } from '../types/index.js';
+import { validateBusinessUnderstanding } from './business-validation.js';
+
 interface ScrapedData {
   title?: string;
   description?: string;
@@ -27,38 +30,87 @@ interface BusinessIntelligence {
 }
 
 /**
- * Analyze scraped business data and generate AI intelligence
+ * Generate structured BusinessUnderstanding JSON from scraped data
+ * Returns valid BusinessUnderstanding object with all required fields
  */
-export async function generateBusinessIntelligence(
+export function generateStructuredBusinessUnderstanding(
   scraped: ScrapedData,
   conversationalInput?: string
-): Promise<BusinessIntelligence> {
+): BusinessUnderstanding {
   try {
     // Extract basic info from scraped data
     const businessName = scraped.title || 'Business';
     const description = scraped.description || conversationalInput || '';
 
-    // Use simple text analysis + pattern matching (without OpenAI for now)
-    // In production, this would call OpenAI GPT-4
-    const intelligence = {
-      businessName,
-      services: extractServices(description, businessName),
-      industryCategory: detectIndustry(description, businessName),
-      targetAudience: generateTargetAudience(description),
-      uniqueValue: extractUniqueValue(description),
-      marketingCopy: generateMarketingCopy(businessName, description),
-      heroHeadline: generateHeroHeadline(businessName, description),
-      seoKeywords: generateSEOKeywords(businessName, description),
-      leadQualificationQuestions: generateLeadQuestions(description),
-      brandColors: extractBrandColors(),
-      tone: detectTone(description),
+    // Generate all required fields deterministically
+    const category = detectIndustry(description, businessName);
+    const location = extractLocation(description) || 'Local Service Area';
+    const services = extractServices(description, businessName);
+    const brandTone = detectBrandTone(description);
+    const seoKeywords = generateSEOKeywords(businessName, description);
+    const targetAudience = generateTargetAudience(description);
+    const valueProposition = extractUniqueValue(description);
+    const trustSignals = generateTrustSignals(businessName, description);
+    const brandColors = extractBrandColors();
+
+    // Build strictly typed BusinessUnderstanding object
+    const businessUnderstanding: BusinessUnderstanding = {
+      name: businessName,
+      category,
+      location,
+      services,
+      valueProposition,
+      targetAudience,
+      brandTone,
+      brandColors,
+      trustSignals,
+      seoKeywords,
+      contactPreferences: {
+        email: !!scraped.email,
+        phone: !!scraped.phone,
+        booking: true, // Default to true for better conversion
+      },
+      logoUrl: scraped.images?.[0], // Use first image as potential logo
+      imageAssets: {
+        hero: scraped.images?.[0],
+        gallery: scraped.images?.slice(0, 5) || [],
+      },
     };
 
-    return intelligence;
+    return businessUnderstanding;
   } catch (err) {
-    console.error('[AI Intelligence Error]', err);
-    return { businessName: 'Business' };
+    console.error('[Business Understanding Generation Error]', err);
+    // Return minimum valid object on error
+    return {
+      name: 'Business',
+      category: 'Services',
+      location: 'Local',
+      services: ['Services'],
+      valueProposition: 'Quality service delivered professionally',
+      targetAudience: 'Businesses and individuals',
+      brandTone: 'professional',
+      brandColors: ['#3B82F6', '#10B981'],
+      trustSignals: ['Professional', 'Reliable'],
+      seoKeywords: ['service', 'professional', 'quality'],
+      contactPreferences: {
+        email: true,
+        phone: true,
+        booking: true,
+      },
+    };
   }
+}
+
+/**
+ * Analyze scraped business data and generate AI intelligence
+ * NOTE: This is the legacy function, use generateStructuredBusinessUnderstanding instead
+ */
+export async function generateBusinessIntelligence(
+  scraped: ScrapedData,
+  conversationalInput?: string
+): Promise<BusinessUnderstanding> {
+  // Use the new structured generator
+  return generateStructuredBusinessUnderstanding(scraped, conversationalInput);
 }
 
 /**
@@ -103,6 +155,85 @@ function detectIndustry(description: string, name: string): string {
   if (text.match(/retail|shop|store|ecommerce/)) return 'Retail';
 
   return 'Services';
+}
+
+/**
+ * Extract location from description
+ */
+function extractLocation(description: string): string {
+  const text = description.toLowerCase();
+  
+  // Look for city/state patterns or location indicators
+  const locationPatterns = [
+    /(?:in|based in|located in|serving|available in)\s+([A-Za-z\s]+?)(?:\.|,|$)/i,
+    /([A-Z][A-Za-z]+),\s*([A-Z]{2})/,
+  ];
+
+  for (const pattern of locationPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      return match[1] || match[0];
+    }
+  }
+
+  return '';
+}
+
+/**
+ * Generate trust signals / social proof
+ */
+function generateTrustSignals(name: string, description: string): string[] {
+  const signals: string[] = [];
+  const text = description.toLowerCase();
+
+  // Check for quality indicators
+  if (text.includes('award') || text.includes('certified')) {
+    signals.push('Industry certified and award-winning');
+  }
+  if (text.includes('year') || text.includes('since')) {
+    signals.push('Established business with proven track record');
+  }
+  if (text.includes('client') || text.includes('customer')) {
+    signals.push('Hundreds of satisfied clients');
+  }
+  if (text.includes('expert') || text.includes('professional')) {
+    signals.push('Expert team of professionals');
+  }
+  if (text.includes('guarantee') || text.includes('money back')) {
+    signals.push('100% satisfaction guarantee');
+  }
+  
+  // Default signals
+  if (signals.length === 0) {
+    signals.push('Professional service delivered');
+    signals.push('Customer-focused approach');
+    signals.push('Quality guaranteed');
+  }
+
+  return signals.slice(0, 5); // Max 5 trust signals
+}
+
+/**
+ * Detect brand tone matching BusinessUnderstanding requirements
+ */
+function detectBrandTone(description: string): 'professional' | 'friendly' | 'luxury' | 'bold' | 'casual' {
+  const text = description.toLowerCase();
+
+  if (text.includes('luxury') || text.includes('premium') || text.includes('exclusive')) {
+    return 'luxury';
+  }
+  if (text.includes('bold') || text.includes('aggressive') || text.includes('innovative')) {
+    return 'bold';
+  }
+  if (text.includes('casual') || text.includes('fun') || text.includes('relaxed')) {
+    return 'casual';
+  }
+  if (text.includes('friendly') || text.includes('approachable') || text.includes('warm')) {
+    return 'friendly';
+  }
+  
+  // Default to professional
+  return 'professional';
 }
 
 /**
@@ -176,26 +307,43 @@ function generateHeroHeadline(name: string, description: string): string {
 }
 
 /**
- * Generate SEO keywords
+ * Generate SEO keywords (minimum 5, maximum 20)
  */
 function generateSEOKeywords(name: string, description: string): string[] {
   const industry = detectIndustry(description, name);
-  const keywords = [name];
+  const keywords: string[] = [];
 
-  const industryKeywords = {
-    Landscaping: ['landscaping', 'garden design', 'lawn care', 'outdoor design'],
-    Photography: ['photography', 'photographer', 'photo services', 'event photography'],
-    Design: ['graphic design', 'web design', 'branding', 'ui design'],
-    'Software Development': ['web development', 'software development', 'app development', 'coding'],
-    Consulting: ['consulting', 'business consulting', 'strategy', 'advisory'],
-    Marketing: ['digital marketing', 'social media marketing', 'seo services', 'marketing'],
+  const industryKeywords: Record<string, string[]> = {
+    Landscaping: ['landscaping', 'garden design', 'lawn care', 'outdoor design', 'landscape maintenance'],
+    Photography: ['photography', 'photographer', 'photo services', 'event photography', 'professional photos'],
+    Design: ['graphic design', 'web design', 'branding', 'ui design', 'visual design'],
+    'Software Development': ['web development', 'software development', 'app development', 'coding', 'custom software'],
+    Consulting: ['consulting', 'business consulting', 'strategy', 'advisory', 'strategic planning'],
+    Marketing: ['digital marketing', 'social media marketing', 'seo services', 'marketing', 'online marketing'],
   };
 
-  const kw = industryKeywords[industry as keyof typeof industryKeywords] || [];
-  keywords.push(...kw);
-  keywords.push('local services', 'professional services');
+  // Add business name
+  if (name && name.length > 0) {
+    keywords.push(name);
+  }
 
-  return keywords;
+  // Add industry-specific keywords
+  const kw = industryKeywords[industry] || industryKeywords['Services'] || ['service', 'professional', 'quality'];
+  keywords.push(...kw);
+  
+  // Add generic keywords as fallback
+  keywords.push('local services', 'professional services', industry.toLowerCase());
+
+  // Remove duplicates and ensure minimum 5 keywords
+  const uniqueKeywords = Array.from(new Set(keywords.filter((k, idx) => k && keywords.indexOf(k) === idx)));
+  
+  // Ensure we have at least 5 keywords
+  if (uniqueKeywords.length < 5) {
+    uniqueKeywords.push('service', 'professional', 'quality', 'trusted', 'experienced');
+  }
+
+  // Return up to 20 keywords
+  return uniqueKeywords.slice(0, 20);
 }
 
 /**

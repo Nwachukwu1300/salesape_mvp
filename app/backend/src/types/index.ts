@@ -9,6 +9,10 @@
 // BUSINESS UNDERSTANDING SCHEMA
 // ============================================================================
 
+// ============================================================================
+// BUSINESS UNDERSTANDING SCHEMA
+// ============================================================================
+
 /**
  * BusinessUnderstanding
  * Represents the complete understanding of a user's business, compiled from:
@@ -19,18 +23,41 @@
  * This is deterministic JSON used to seed website generation.
  */
 export interface BusinessUnderstanding {
-  businessName: string;
-  industry: string;
-  services: string[];
+  // Core Identity
+  name: string;
+  category: string;
   location: string;
-  brandTone: "formal" | "friendly" | "luxury" | "casual";
+  
+  // Services & Offerings
+  services: string[];
+  valueProposition: string;
+  
+  // Audience & Brand
+  targetAudience: string;
+  brandTone: "professional" | "friendly" | "luxury" | "bold" | "casual";
   brandColors: string[];
   logoUrl?: string;
+  
+  // Trust & Social Proof
+  trustSignals: string[];
+  
+  // SEO & Keywords
+  seoKeywords: string[];
+  
+  // Contact Preferences
   contactPreferences: {
     email: boolean;
     phone: boolean;
     booking: boolean;
   };
+  
+  // Image Assets
+  imageAssets?: {
+    hero?: string;
+    gallery?: string[];
+  };
+  
+  // Optional: SEO Insights
   seoInsights?: SeoAuditResult;
 }
 
