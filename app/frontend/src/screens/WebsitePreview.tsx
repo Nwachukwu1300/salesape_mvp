@@ -584,18 +584,21 @@ export function WebsitePreview() {
                       )}
                       
                       {template?.layout === 'creative' && (
-                        <section className="relative overflow-hidden p-0" style={{ backgroundColor: templateStyle.bgColor, color: templateStyle.textColor, minHeight: '500px' }}>
-                          <div className="absolute inset-0 opacity-10">
-                            <div className="absolute inset-0" style={{ background: `repeating-linear-gradient(45deg, ${templateStyle.accent}, ${templateStyle.accent} 10px, transparent 10px, transparent 20px)` }} />
-                          </div>
-                          <div className="relative p-12 md:p-20 flex flex-col justify-center h-full">
+                        <section className="relative overflow-hidden p-0" style={{ backgroundColor: templateStyle.bgColor, minHeight: '500px' }}>
+                          {/* Subtle accent gradient overlay */}
+                          <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${templateStyle.bgColor} 0%, ${templateStyle.secondary} 100%)` }} />
+                          {/* Decorative accent line */}
+                          <div className="absolute bottom-0 left-0 right-0 h-1" style={{ backgroundColor: templateStyle.accent }} />
+                          <div className="relative p-12 md:p-20 flex flex-col justify-center h-full" style={{ minHeight: '500px' }}>
                             <h1 className="text-6xl md:text-7xl font-black mb-4 leading-tight" style={{ color: templateStyle.accent }}>
                               {business?.name}
                             </h1>
-                            <p className="text-2xl mb-8 max-w-3xl" style={{ color: templateStyle.secondary }}>
+                            <p className="text-2xl mb-8 max-w-3xl" style={{ color: templateStyle.textColor }}>
                               {business?.description || 'Create. Inspire. Transform.'}
                             </p>
-                            <Button variant="secondary" size="lg">Explore Our Work</Button>
+                            <div>
+                              <Button variant="primary" size="lg" style={{ backgroundColor: templateStyle.accent, color: '#ffffff' }}>Explore Our Work</Button>
+                            </div>
                           </div>
                         </section>
                       )}
@@ -671,8 +674,8 @@ export function WebsitePreview() {
                         </div>
                       </section>
 
-                      {/* Template-Specific Sections */}
-                      {template?.sections?.slice(0).map((s: any, idx: number) => {
+                      {/* Template-Specific Sections (skip first section which was already rendered above) */}
+                      {template?.sections?.slice(1).map((s: any, idx: number) => {
                         const bgColor = s.type === 'cta-section' || s.type === 'cta-full' || s.type === 'cta-bold' || s.type === 'cta-tech' ? templateStyle.secondary : 'transparent';
                         const textColor = templateStyle.textColor || '#000';
                   

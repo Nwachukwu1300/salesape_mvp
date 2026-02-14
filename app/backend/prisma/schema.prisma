@@ -44,6 +44,12 @@ model Business {
   isPublished Boolean   @default(false)
   publishedAt DateTime?
   slug        String?   @unique
+  // Website Generation Engine fields
+  templateId       String?
+  websiteConfig    Json?
+  generationStatus String   @default("idle") // idle, queued, processing, completed, failed
+  generationStep   String?  // Current step: scraping, analyzing, selecting_template, generating_config, enriching_images
+  imageAssets      Json?    // { hero: string, gallery: string[] }
   // Encrypted credentials for third-party integrations
   googleCalendarTokens String?  // Encrypted JSON: {accessToken, refreshToken}
   outlookCalendarTokens String?  // Encrypted JSON: {accessToken, refreshToken}

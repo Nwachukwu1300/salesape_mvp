@@ -70,11 +70,13 @@ export function generateStructuredBusinessUnderstanding(
         phone: !!scraped.phone,
         booking: true, // Default to true for better conversion
       },
-      logoUrl: scraped.images?.[0], // Use first image as potential logo
-      imageAssets: {
-        hero: scraped.images?.[0],
-        gallery: scraped.images?.slice(0, 5) || [],
-      },
+      ...(scraped.images?.[0] ? {
+        logoUrl: scraped.images[0],
+        imageAssets: {
+          hero: scraped.images[0],
+          gallery: scraped.images.slice(0, 5),
+        },
+      } : {}),
     };
 
     return businessUnderstanding;

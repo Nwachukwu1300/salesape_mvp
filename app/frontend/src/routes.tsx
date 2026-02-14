@@ -10,6 +10,7 @@ import { WebsitePreview } from "./screens/WebsitePreview";
 import { PaymentSuccess } from "./screens/PaymentSuccess";
 import { ManageBookings } from "./screens/manage-bookings";
 import { ConversationUI } from "./screens/ConversationUI";
+import { GeneratingWebsite } from "./screens/GeneratingWebsite";
 
 const routes: RouteObject[] = [
   { path: "/", element: <AuthScreen /> },
@@ -21,6 +22,7 @@ const routes: RouteObject[] = [
   { path: "/manage-bookings", element: <ManageBookings /> },
   { path: "/seo-audit", element: <SEOAudit /> },
   { path: "/website-preview/:id", element: <WebsitePreview /> },
+  { path: "/generating/:id", element: <GeneratingWebsite /> },
   { path: "/payment-success", element: <PaymentSuccess /> },
 ];
 

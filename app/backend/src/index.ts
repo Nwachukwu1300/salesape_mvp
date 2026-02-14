@@ -1,6 +1,7 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
 import fetch from 'node-fetch';
@@ -14,6 +15,18 @@ import twilio from 'twilio';
 import { google } from 'googleapis';
 import crypto from 'crypto';
 // Sentry removed: monitoring disabled in codebase
+
+// Website Generation Engine imports
+import { selectTemplate, getAllTemplates, getTemplateById } from './templates/index.js';
+import { generateWebsiteConfig } from './website-config/index.js';
+import type { WebsiteConfig } from './website-config/index.js';
+import { enrichImages, enrichImagesSync } from './images/index.js';
+import {
+  enqueueWebsiteGeneration,
+  getJobStatus,
+} from './queues/website.queue.js';
+import type { WebsiteGenerationJobData } from './queues/website.queue.js';
+import { startWorker } from './workers/website.worker.js';
 
 // Import new utilities and middleware
 import { logger, requestLogger } from './utils/logger.js';
@@ -32,8 +45,8 @@ import {
 import {
   validateAIResponse,
   extractJSONFromResponse,
-  ConversationMessage,
 } from './utils/conversation-schema.js';
+import type { ConversationMessage } from './utils/conversation-schema.js';
 import {
   getCurrentStage,
   generateNextQuestion,
@@ -72,11 +85,36 @@ const prisma = new PrismaClient();
 
 // --- Middleware ---
 app.use(cors());
+// Security headers with Helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https:", "blob:"],
+      scriptSrc: ["'self'"],
+      connectSrc: ["'self'", "https://api.unsplash.com", "https://www.googleapis.com"],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // Allow embedding for preview
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
 // Limit request body size to 10MB to prevent abuse
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(requestLogger); // Request/response logging
 app.use(globalLimiter); // Global rate limiting
+
+// Start website generation worker (if Redis available)
+try {
+  if (process.env.REDIS_HOST || process.env.NODE_ENV === 'development') {
+    startWorker();
+    console.log('[Worker] Website generation worker initialized');
+  }
+} catch (err) {
+  console.warn('[Worker] Failed to start website generation worker:', err);
+}
 
 // --- TypeScript Interfaces ---
 interface AuthRequest extends Request {
@@ -176,51 +214,129 @@ async function applyLeadAutomationRules(businessId: string, leadId: string, trig
 
 // --- Helper Functions ---
 
-// Website scraping
+// Website scraping with security hardening
 async function scrapeWebsite(url: string): Promise<{ title?: string; description?: string; email?: string; phone?: string; images?: string[]; headings?: string[]; error?: string }> {
   try {
-    const response = await fetch(url);
-    if (!response.ok) return { error: `Failed to fetch: ${response.status}` };
-    const html = await response.text();
+    // Validate URL format
+    let urlObj: URL;
+    try {
+      urlObj = new URL(url);
+    } catch {
+      return { error: 'Invalid URL format' };
+    }
+
+    // Block private/internal IPs
+    const hostname = urlObj.hostname.toLowerCase();
+    if (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '0.0.0.0' ||
+      hostname.startsWith('192.168.') ||
+      hostname.startsWith('10.') ||
+      hostname.startsWith('172.16.') ||
+      hostname.startsWith('172.17.') ||
+      hostname.startsWith('172.18.') ||
+      hostname.startsWith('172.19.') ||
+      hostname.startsWith('172.2') ||
+      hostname.startsWith('172.30.') ||
+      hostname.startsWith('172.31.') ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.internal')
+    ) {
+      return { error: 'Invalid URL: private IP addresses not allowed' };
+    }
+
+    // Use axios with timeout and size limit
+    const response = await axios.get(url, {
+      timeout: 10000, // 10 second timeout
+      maxContentLength: 5 * 1024 * 1024, // 5MB max
+      headers: {
+        'User-Agent': 'SalesAPE-Bot/1.0 (Website Analysis)',
+        Accept: 'text/html',
+      },
+      responseType: 'text',
+    });
+
+    const html = response.data;
+
+    // Verify content size
+    if (typeof html !== 'string' || html.length > 5 * 1024 * 1024) {
+      return { error: 'Response too large' };
+    }
+
     const $ = cheerio.load(html);
-    
-    const title = $('title').text() || $('h1').first().text() || '';
-    const description = $('meta[name="description"]').attr('content') || $('p').first().text() || '';
-    const text = $.root().text();
-    
+
+    // Strip all script tags for security before processing
+    $('script').remove();
+    $('noscript').remove();
+    $('style').remove();
+    $('iframe').remove();
+
+    const title = ($('title').text() || $('h1').first().text() || '').trim().substring(0, 200);
+    const description = (
+      $('meta[name="description"]').attr('content') ||
+      $('meta[property="og:description"]').attr('content') ||
+      $('p').first().text() || ''
+    ).trim().substring(0, 500);
+
+    // Limit text extraction for AI input (max 50000 characters)
+    const text = $.root().text().substring(0, 50000);
+
     // Extract contact info
     const emailMatch = text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
     const phoneMatch = text.match(/\+?\d[\d\s().-]{7,}\d/);
-    
-    // Extract images
+
+    // Extract images with base URL resolution
     const images: string[] = [];
     $('img').each((_i, el) => {
-      const src = $(el).attr('src');
-      if (src && (src.startsWith('http') || src.startsWith('/'))) {
+      let src = $(el).attr('src') || $(el).attr('data-src');
+      if (!src) return;
+
+      // Skip tiny images and icons
+      const width = parseInt($(el).attr('width') || '0', 10);
+      const height = parseInt($(el).attr('height') || '0', 10);
+      if ((width > 0 && width < 50) || (height > 0 && height < 50)) return;
+      if (src.includes('icon') || src.includes('logo') || src.includes('favicon')) return;
+
+      // Make relative URLs absolute
+      if (src.startsWith('//')) {
+        src = `https:${src}`;
+      } else if (src.startsWith('/')) {
+        src = `${urlObj.protocol}//${urlObj.host}${src}`;
+      } else if (!src.startsWith('http')) {
+        try {
+          src = new URL(src, url).href;
+        } catch {
+          return;
+        }
+      }
+
+      if (src.startsWith('http') && !images.includes(src)) {
         images.push(src);
       }
     });
-    
+
     // Extract headings for context
     const headings: string[] = [];
     $('h1, h2, h3').each((_i, el) => {
-      const text = $(el).text().trim();
-      if (text && headings.length < 5) {
-        headings.push(text);
+      const headingText = $(el).text().trim();
+      if (headingText && headingText.length < 200 && headings.length < 5) {
+        headings.push(headingText);
       }
     });
-    
+
     const result: any = {};
     if (title) result.title = title;
     if (description) result.description = description;
     if (emailMatch) result.email = emailMatch[0];
     if (phoneMatch) result.phone = phoneMatch[0];
-    if (images.length > 0) result.images = images.slice(0, 5);
+    if (images.length > 0) result.images = images.slice(0, 10);
     if (headings.length > 0) result.headings = headings;
-    
+
     return result;
-  } catch (err) {
-    return { error: 'Error scraping website' };
+  } catch (err: any) {
+    logger.warn('Scraping error', { url, error: err?.message });
+    return { error: err?.message || 'Error scraping website' };
   }
 }
 
@@ -571,7 +687,7 @@ app.post('/seo-audit-public', publicSeoAuditLimiter, async (req: Request, res: R
       seoScore: audit.seo,
       performanceScore: audit.performance,
       mobileScore: audit.mobile,
-      issues: Array.isArray(audit.issues?.critical) ? audit.issues.critical : [],
+      issues: Array.isArray((audit.issues as any)?.critical) ? (audit.issues as any).critical : [],
       recommendations: Array.isArray(audit.recommendations) ? audit.recommendations : [],
       createdAt: audit.createdAt,
     };
@@ -612,8 +728,8 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
     }
 
     // Identify client IP for monthly quota tracking
-    const ipRaw = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '');
-    const ip = ipRaw.split(',')[0].trim();
+    const ipRaw = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1');
+    const ip = ipRaw.split(',')[0]?.trim() || '127.0.0.1';
     const now = new Date();
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
@@ -908,12 +1024,13 @@ app.get('/conversation/session/:sessionId', authenticateToken, conversationLimit
     const { sessionId } = req.params;
 
     // Validate sessionId format
-    if (!sessionId || !/^[a-z0-9_\-]{15,40}$/.test(sessionId)) {
+    const sessionIdStr = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+    if (!sessionIdStr || !/^[a-z0-9_\-]{15,40}$/.test(sessionIdStr)) {
       return res.status(400).json({ error: 'Invalid session ID format' });
     }
 
     const session = await prisma.conversationSession.findUnique({
-      where: { id: sessionId },
+      where: { id: sessionIdStr },
     });
 
     if (!session || session.userId !== userId) {
@@ -948,7 +1065,8 @@ app.post('/conversation/session/:sessionId/complete', authenticateToken, async (
     const { businessId } = req.body;
 
     // Validate sessionId format
-    if (!sessionId || !/^[a-z0-9_\-]{15,40}$/.test(sessionId)) {
+    const sessionIdStr = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+    if (!sessionIdStr || !/^[a-z0-9_\-]{15,40}$/.test(sessionIdStr)) {
       return res.status(400).json({ error: 'Invalid session ID format' });
     }
 
@@ -962,7 +1080,7 @@ app.post('/conversation/session/:sessionId/complete', authenticateToken, async (
     }
 
     const session = await prisma.conversationSession.findUnique({
-      where: { id: sessionId },
+      where: { id: sessionIdStr },
     });
 
     if (!session || session.userId !== userId) {
@@ -1000,7 +1118,7 @@ app.post('/conversation/session/:sessionId/complete', authenticateToken, async (
 
     // Mark conversation as completed
     await prisma.conversationSession.update({
-      where: { id: sessionId },
+      where: { id: sessionIdStr },
       data: { status: 'completed' },
     });
 
@@ -1522,19 +1640,19 @@ app.get('/auth/google/callback', async (req: Request, res: Response) => {
       } as any) as any,
     });
 
-    const tokenJson = await tokenRes.json();
+    const tokenJson = await tokenRes.json() as { access_token?: string };
     const accessToken = tokenJson.access_token;
     if (!accessToken) return res.status(400).json({ error: 'Failed to obtain access token' });
 
     const userInfoRes = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${accessToken}`);
-    const profile = await userInfoRes.json();
+    const profile = await userInfoRes.json() as { email: string; name?: string; given_name?: string };
     const email = profile.email;
     const name = profile.name || profile.given_name || '';
 
     let user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
       const refreshToken = crypto.randomBytes(48).toString('hex');
-      user = await prisma.user.create({ data: { email, name, refreshToken, password: null } });
+      user = await prisma.user.create({ data: { email, name, refreshToken, password: '' } });
     }
 
     const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
@@ -1566,7 +1684,7 @@ app.post('/auth/apple/callback', express.urlencoded({ extended: true }), async (
     if (!idToken) return res.status(400).json({ error: 'id_token required' });
 
     const parts = (idToken as string).split('.');
-    if (parts.length !== 3) return res.status(400).json({ error: 'Invalid id_token' });
+    if (parts.length !== 3 || !parts[1]) return res.status(400).json({ error: 'Invalid id_token' });
     const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
     const email = payload.email as string;
     const name = payload.name || '';
@@ -1574,7 +1692,7 @@ app.post('/auth/apple/callback', express.urlencoded({ extended: true }), async (
     let user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
       const refreshToken = crypto.randomBytes(48).toString('hex');
-      user = await prisma.user.create({ data: { email, name, refreshToken, password: null } });
+      user = await prisma.user.create({ data: { email, name, refreshToken, password: '' } });
     }
 
     const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
@@ -1809,6 +1927,428 @@ app.post('/generate-website-config', authenticateToken, async (req: AuthRequest,
   }
 });
 
+// ============================================================================
+// WEBSITE GENERATION ENGINE ENDPOINTS
+// ============================================================================
+
+// GET /templates - List all available templates
+app.get('/templates', authenticateToken, async (_req: AuthRequest, res: Response) => {
+  try {
+    const templates = getAllTemplates();
+    res.json({ templates });
+  } catch (err) {
+    logger.error('Get templates error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch templates' });
+  }
+});
+
+// GET /templates/:id - Get a specific template
+app.get('/templates/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const templateId = paramToString(req.params.id);
+    if (!templateId) return res.status(400).json({ error: 'Template ID required' });
+
+    const template = getTemplateById(templateId);
+    if (!template) return res.status(404).json({ error: 'Template not found' });
+
+    res.json({ template });
+  } catch (err) {
+    logger.error('Get template error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch template' });
+  }
+});
+
+// POST /businesses/:id/select-template - Auto-select template based on business
+app.post('/businesses/:id/select-template', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.id);
+    if (!businessId) return res.status(400).json({ error: 'Business ID required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    // Get business understanding data
+    const analysis = (business.analysis || {}) as any;
+    const bu = analysis.businessUnderstandingValidated || analysis.businessUnderstanding || {};
+
+    const category = bu.category || 'general';
+    const brandTone = bu.brandTone || 'professional';
+    const services = bu.services || [];
+    const hasImages = !!(bu.imageAssets?.hero || analysis.scraped?.images?.length);
+
+    // Select template
+    const result = selectTemplate(category, brandTone, services, hasImages);
+
+    // Save to business
+    await prisma.business.update({
+      where: { id: businessId },
+      data: {
+        templateId: result.template.id,
+        analysis: {
+          ...analysis,
+          templateSelection: {
+            templateId: result.template.id,
+            confidence: result.confidence,
+            reason: result.reason,
+            selectedAt: new Date(),
+          },
+        },
+      },
+    });
+
+    res.json({
+      templateId: result.template.id,
+      template: result.template,
+      confidence: result.confidence,
+      reason: result.reason,
+    });
+  } catch (err) {
+    logger.error('Select template error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to select template' });
+  }
+});
+
+// POST /businesses/:id/generate-config - Generate full website config
+app.post('/businesses/:id/generate-config', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.id);
+    if (!businessId) return res.status(400).json({ error: 'Business ID required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    // Get business understanding
+    const analysis = (business.analysis || {}) as any;
+    const bu = analysis.businessUnderstandingValidated || analysis.businessUnderstanding;
+
+    if (!bu) {
+      return res.status(400).json({ error: 'Business understanding not found. Complete onboarding first.' });
+    }
+
+    // Get or select template
+    let templateId = business.templateId || req.body.templateId;
+    if (!templateId) {
+      const templateResult = selectTemplate(
+        bu.category || 'general',
+        bu.brandTone || 'professional',
+        bu.services,
+        !!(bu.imageAssets?.hero)
+      );
+      templateId = templateResult.template.id;
+    }
+
+    // Generate config
+    const config = await generateWebsiteConfig({
+      businessUnderstanding: {
+        name: bu.name || business.name,
+        category: bu.category || 'general',
+        location: bu.location || '',
+        services: bu.services || [],
+        valueProposition: bu.valueProposition || business.description || '',
+        targetAudience: bu.targetAudience || '',
+        brandTone: bu.brandTone || 'professional',
+        brandColors: bu.brandColors || [],
+        trustSignals: bu.trustSignals || [],
+        seoKeywords: bu.seoKeywords || [],
+        contactPreferences: bu.contactPreferences || { email: true, phone: false, booking: true },
+        logoUrl: bu.logoUrl,
+        imageAssets: bu.imageAssets,
+      },
+      templateId,
+      scrapedData: analysis.scraped || {},
+    });
+
+    // Save to business
+    await prisma.business.update({
+      where: { id: businessId },
+      data: {
+        templateId,
+        websiteConfig: config as any,
+        generatedConfig: config as any,
+      },
+    });
+
+    res.json({ config, templateId });
+  } catch (err) {
+    logger.error('Generate config error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to generate website config' });
+  }
+});
+
+// POST /businesses/:id/enrich-images - Enrich business with images
+app.post('/businesses/:id/enrich-images', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.id);
+    if (!businessId) return res.status(400).json({ error: 'Business ID required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const analysis = (business.analysis || {}) as any;
+    const bu = analysis.businessUnderstandingValidated || analysis.businessUnderstanding || {};
+
+    // Enrich images
+    const result = await enrichImages({
+      scrapedImages: analysis.scraped?.images,
+      category: bu.category || 'business',
+      seoKeywords: bu.seoKeywords || [],
+      businessName: bu.name || business.name,
+    });
+
+    // Update business
+    await prisma.business.update({
+      where: { id: businessId },
+      data: {
+        imageAssets: result.assets as any,
+        analysis: {
+          ...analysis,
+          imageEnrichment: {
+            source: result.source,
+            count: result.count,
+            enrichedAt: new Date(),
+          },
+        },
+      },
+    });
+
+    // Also update website config if exists
+    if (business.websiteConfig) {
+      const config = business.websiteConfig as any;
+      config.hero = config.hero || {};
+      config.hero.heroImage = result.assets.hero;
+      if (config.about) {
+        config.about.image = result.assets.gallery[0];
+      }
+      await prisma.business.update({
+        where: { id: businessId },
+        data: { websiteConfig: config },
+      });
+    }
+
+    res.json({
+      imageAssets: result.assets,
+      source: result.source,
+      count: result.count,
+    });
+  } catch (err) {
+    logger.error('Enrich images error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to enrich images' });
+  }
+});
+
+// POST /businesses/:id/generate-website - Start async website generation
+app.post('/businesses/:id/generate-website', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.id);
+    if (!businessId) return res.status(400).json({ error: 'Business ID required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    // Check if already generating
+    if (business.generationStatus === 'processing' || business.generationStatus === 'queued') {
+      return res.status(409).json({
+        error: 'Website generation already in progress',
+        status: business.generationStatus,
+        step: business.generationStep,
+      });
+    }
+
+    // Get business understanding
+    const analysis = (business.analysis || {}) as any;
+    const bu = analysis.businessUnderstandingValidated || analysis.businessUnderstanding;
+
+    if (!bu) {
+      return res.status(400).json({ error: 'Business understanding not found. Complete onboarding first.' });
+    }
+
+    // Prepare job data
+    const jobData: WebsiteGenerationJobData = {
+      businessId,
+      userId: req.userId!,
+      businessUnderstanding: {
+        name: bu.name || business.name,
+        category: bu.category || 'general',
+        location: bu.location || '',
+        services: bu.services || [],
+        valueProposition: bu.valueProposition || '',
+        targetAudience: bu.targetAudience || '',
+        brandTone: bu.brandTone || 'professional',
+        brandColors: bu.brandColors || [],
+        trustSignals: bu.trustSignals || [],
+        seoKeywords: bu.seoKeywords || [],
+        contactPreferences: bu.contactPreferences || { email: true, phone: false, booking: true },
+        logoUrl: bu.logoUrl,
+      },
+      sourceUrl: business.url || undefined,
+    };
+
+    // Check if Redis/BullMQ is available
+    try {
+      const { jobId } = await enqueueWebsiteGeneration(jobData);
+
+      // Update business status
+      await prisma.business.update({
+        where: { id: businessId },
+        data: {
+          generationStatus: 'queued',
+          generationStep: 'queued',
+        },
+      });
+
+      res.json({ jobId, status: 'queued' });
+    } catch (queueError) {
+      // Fallback to synchronous generation if queue not available
+      logger.warn('Queue not available, falling back to sync generation');
+
+      await prisma.business.update({
+        where: { id: businessId },
+        data: {
+          generationStatus: 'processing',
+          generationStep: 'selecting_template',
+        },
+      });
+
+      // Select template
+      const templateResult = selectTemplate(
+        bu.category || 'general',
+        bu.brandTone || 'professional',
+        bu.services,
+        false
+      );
+
+      await prisma.business.update({
+        where: { id: businessId },
+        data: { generationStep: 'generating_config' },
+      });
+
+      // Generate config
+      const config = await generateWebsiteConfig({
+        businessUnderstanding: {
+          name: bu.name || business.name,
+          category: bu.category || 'general',
+          location: bu.location || '',
+          services: bu.services || [],
+          valueProposition: bu.valueProposition || '',
+          targetAudience: bu.targetAudience || '',
+          brandTone: bu.brandTone || 'professional',
+          brandColors: bu.brandColors || [],
+          trustSignals: bu.trustSignals || [],
+          seoKeywords: bu.seoKeywords || [],
+          contactPreferences: bu.contactPreferences || { email: true, phone: false, booking: true },
+          logoUrl: bu.logoUrl,
+        },
+        templateId: templateResult.template.id,
+        scrapedData: analysis.scraped || {},
+      });
+
+      await prisma.business.update({
+        where: { id: businessId },
+        data: { generationStep: 'enriching_images' },
+      });
+
+      // Enrich images (sync fallback)
+      const imageAssets = enrichImagesSync(bu.category || 'business');
+      config.hero.heroImage = imageAssets.hero;
+
+      // Save final result
+      await prisma.business.update({
+        where: { id: businessId },
+        data: {
+          templateId: templateResult.template.id,
+          websiteConfig: config as any,
+          generatedConfig: config as any,
+          imageAssets: imageAssets as any,
+          generationStatus: 'completed',
+          generationStep: null,
+        },
+      });
+
+      res.json({
+        status: 'completed',
+        templateId: templateResult.template.id,
+        config,
+      });
+    }
+  } catch (err) {
+    logger.error('Generate website error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to start website generation' });
+  }
+});
+
+// GET /businesses/:id/website-status - Check website generation status
+app.get('/businesses/:id/website-status', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.id);
+    if (!businessId) return res.status(400).json({ error: 'Business ID required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    // Map generation step to user-friendly message
+    const stepMessages: Record<string, string> = {
+      queued: 'Preparing to generate your website...',
+      scraping: 'Analyzing your existing website...',
+      analyzing: 'Understanding your business...',
+      selecting_template: 'Selecting the perfect template...',
+      generating_config: 'Generating website content...',
+      enriching_images: 'Optimizing images...',
+      completed: 'Website generation complete!',
+      failed: 'Generation failed. Please try again.',
+    };
+
+    const status = business.generationStatus || 'idle';
+    const step = business.generationStep || status;
+
+    res.json({
+      status,
+      step,
+      message: stepMessages[step] || stepMessages[status] || 'Processing...',
+      websiteConfig: status === 'completed' ? business.websiteConfig : null,
+      templateId: business.templateId,
+      imageAssets: business.imageAssets,
+    });
+  } catch (err) {
+    logger.error('Get website status error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to get website status' });
+  }
+});
+
+// GET /businesses/:id/website-config - Get the generated website config
+app.get('/businesses/:id/website-config', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.id);
+    if (!businessId) return res.status(400).json({ error: 'Business ID required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    if (!business.websiteConfig) {
+      return res.status(404).json({ error: 'Website config not generated yet' });
+    }
+
+    res.json({
+      config: business.websiteConfig,
+      templateId: business.templateId,
+      imageAssets: business.imageAssets,
+      generationStatus: business.generationStatus,
+    });
+  } catch (err) {
+    logger.error('Get website config error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to get website config' });
+  }
+});
+
+// ============================================================================
+// END WEBSITE GENERATION ENGINE ENDPOINTS
+// ============================================================================
+
 // --- Save validated BusinessUnderstanding from recap screen ---
 app.post('/businesses/save-business-understanding', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -1969,9 +2509,8 @@ app.post('/businesses', authenticateToken, async (req: AuthRequest, res: Respons
       if (analysis && typeof analysis === 'object') {
         // allow analysis.businessUnderstanding or top-level
         const bu = analysis.businessUnderstanding || analysis;
-        try {
-          validateBusinessUnderstanding(bu);
-        } catch (err) {
+        let validationResult = validateBUStructure(bu);
+        if (!validationResult.valid) {
           // Try to coerce minimal structure and re-validate
           const inferred = {
             businessName: name || (bu && bu.businessName) || 'My Business',
@@ -1984,13 +2523,15 @@ app.post('/businesses', authenticateToken, async (req: AuthRequest, res: Respons
             contactPreferences: (bu && bu.contactPreferences) || { email: true, phone: false, booking: true },
             seoInsights: (bu && bu.seoInsights) || undefined,
           };
-          validateBusinessUnderstanding(inferred);
-          analysis.businessUnderstanding = inferred;
+          validationResult = validateBUStructure(inferred);
+          if (validationResult.valid) {
+            analysis.businessUnderstanding = inferred;
+          }
         }
 
         // Store a canonical deterministic version as analysis.businessUnderstandingCanonical
         try {
-          const canonical = deterministicStringifyBusiness(analysis.businessUnderstanding || bu);
+          const canonical = JSON.stringify(analysis.businessUnderstanding || bu, Object.keys(analysis.businessUnderstanding || bu).sort());
           analysis.businessUnderstandingCanonical = JSON.parse(canonical);
         } catch (err) {
           // swallow - not critical
@@ -2073,7 +2614,8 @@ app.patch('/businesses/:id', authenticateToken, async (req: AuthRequest, res: Re
       data.analysis = Object.assign({}, (business.analysis || {}), analysis as Record<string, any>);
     }
     if (branding && typeof branding === 'object' && branding !== null) {
-      data.branding = Object.assign({}, (business.branding || {}), branding as Record<string, any>);
+      const existingConfig = (business.generatedConfig as Record<string, any>) || {};
+      data.generatedConfig = Object.assign({}, existingConfig, { branding: Object.assign({}, existingConfig.branding || {}, branding as Record<string, any>) });
     }
 
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
@@ -2445,7 +2987,7 @@ app.get('/businesses/:id/template', authenticateToken, async (req: AuthRequest, 
     }
 
     // Fetch branding data (which includes scraped images)
-    const brandingData = business.branding || {};
+    const brandingData = ((business.generatedConfig as Record<string, any>)?.branding) || {};
 
     res.json({
       templates,
@@ -3182,7 +3724,7 @@ app.get('/public/business', async (req: Request, res: Response) => {
       businessType,
       analysis: business.analysis || {},
       testimonials: [],
-      branding: business.branding || {},
+      branding: ((business.generatedConfig as Record<string, any>)?.branding) || {},
       leadForm: {
         title: `Get in touch with ${business.name}`,
         fields: ['name', 'email', 'company', 'message'],
