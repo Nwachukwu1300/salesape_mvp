@@ -2166,6 +2166,10 @@ app.post('/businesses/:id/generate-website', authenticateToken, async (req: Auth
       return res.status(400).json({ error: 'Business understanding not found. Complete onboarding first.' });
     }
 
+    // Get desiredFeatures from questionnaire answers
+    const questionnaire = analysis.questionnaire || {};
+    const desiredFeatures = questionnaire.desiredFeatures || bu.desiredFeatures || [];
+
     // Prepare job data
     const jobData: WebsiteGenerationJobData = {
       businessId,
@@ -2182,6 +2186,7 @@ app.post('/businesses/:id/generate-website', authenticateToken, async (req: Auth
         trustSignals: bu.trustSignals || [],
         seoKeywords: bu.seoKeywords || [],
         contactPreferences: bu.contactPreferences || { email: true, phone: false, booking: true },
+        desiredFeatures,
         logoUrl: bu.logoUrl,
       },
       sourceUrl: business.url || undefined,
@@ -2240,6 +2245,7 @@ app.post('/businesses/:id/generate-website', authenticateToken, async (req: Auth
           trustSignals: bu.trustSignals || [],
           seoKeywords: bu.seoKeywords || [],
           contactPreferences: bu.contactPreferences || { email: true, phone: false, booking: true },
+          desiredFeatures,
           logoUrl: bu.logoUrl,
         },
         templateId: templateResult.template.id,
@@ -2989,13 +2995,100 @@ app.get('/businesses/:id/template', authenticateToken, async (req: AuthRequest, 
     // Fetch branding data (which includes scraped images)
     const brandingData = ((business.generatedConfig as Record<string, any>)?.branding) || {};
 
+    // Get imageAssets from business record
+    const imageAssets = (business.imageAssets as { hero?: string; gallery?: string[] }) || {};
+
+    // Get desiredFeatures from questionnaire
+    const questionnaire = (analysis as any)?.questionnaire || {};
+    const desiredFeatures: string[] = questionnaire.desiredFeatures || [];
+
+    console.log('🎯 Template endpoint - analysis:', JSON.stringify(analysis, null, 2));
+    console.log('🎯 Template endpoint - questionnaire:', JSON.stringify(questionnaire, null, 2));
+    console.log('🎯 Template endpoint - desiredFeatures:', desiredFeatures);
+
+    // Helper to check if a feature was selected
+    const hasFeature = (feature: string) =>
+      desiredFeatures.some((f: string) => f.toLowerCase().includes(feature.toLowerCase()));
+
+    // Dynamically add sections to templates based on selected features
+    const templatesWithFeatures = templates.map(template => {
+      const additionalSections: any[] = [];
+      const existingSectionTypes = template.sections.map((s: any) => s.type);
+
+      // Add testimonial section if selected and not already present
+      if (hasFeature('testimonial') && !existingSectionTypes.includes('testimonial-carousel')) {
+        additionalSections.push({
+          type: 'testimonial-carousel',
+          heading: 'What Our Clients Say',
+          items: ['Great service and professional team', 'Exceeded our expectations', 'Highly recommended']
+        });
+      }
+
+      // Add gallery section if selected and not already present
+      if (hasFeature('gallery') && !existingSectionTypes.includes('gallery-grid')) {
+        additionalSections.push({
+          type: 'gallery-grid',
+          heading: 'Our Gallery',
+          content: 'See our work in action'
+        });
+      }
+
+      // Add pricing section if selected and not already present
+      if (hasFeature('pricing') && !existingSectionTypes.includes('pricing-table')) {
+        additionalSections.push({
+          type: 'pricing-table',
+          heading: 'Our Pricing',
+          content: 'Transparent pricing for all services'
+        });
+      }
+
+      // Add blog preview section if selected
+      if (hasFeature('blog') && !existingSectionTypes.includes('blog-preview')) {
+        additionalSections.push({
+          type: 'blog-preview',
+          heading: 'Latest Articles',
+          content: 'Insights and updates from our team'
+        });
+      }
+
+      // Add live chat indicator if selected
+      if (hasFeature('chat') && !existingSectionTypes.includes('live-chat')) {
+        additionalSections.push({
+          type: 'live-chat',
+          heading: 'Live Chat Support',
+          content: 'We\'re here to help! Chat with us anytime.'
+        });
+      }
+
+      // Insert additional sections before the last section (usually CTA)
+      if (additionalSections.length > 0) {
+        const sections = [...template.sections];
+        // Insert before the last section (typically CTA)
+        const insertIndex = Math.max(sections.length - 1, 0);
+        sections.splice(insertIndex, 0, ...additionalSections);
+        return { ...template, sections };
+      }
+
+      return template;
+    });
+
+    // Find the recommended template from the modified templates
+    const recommendedWithFeatures = templatesWithFeatures.find(t => t.id === recommended.id) || templatesWithFeatures[0];
+
     res.json({
-      templates,
-      recommended,
+      templates: templatesWithFeatures,
+      recommended: recommendedWithFeatures,
       businessType,
       analysis,
       testimonials,
-      branding: brandingData,
+      desiredFeatures,
+      branding: {
+        ...brandingData,
+        // Include gallery images from imageAssets for templates to use
+        images: imageAssets.gallery?.map((url, i) => ({ url, title: `Gallery ${i + 1}` })) || [],
+        heroImage: imageAssets.hero,
+      },
+      imageAssets,
     });
   } catch (err) {
     console.error('Template fetch error:', err);
@@ -4682,6 +4775,9 @@ app.post('/websites/questionnaire/submit', authenticateToken, async (req: AuthRe
   try {
     const { answers } = req.body;
     const userId = req.userId!;
+
+    console.log('🎯 Questionnaire submit - received answers:', JSON.stringify(answers, null, 2));
+    console.log('🎯 Questionnaire submit - desiredFeatures:', answers?.desiredFeatures);
 
     if (!answers || typeof answers !== 'object') {
       return res.status(400).json({ error: 'Answers are required' });

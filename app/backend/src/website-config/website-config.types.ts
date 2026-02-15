@@ -105,15 +105,29 @@ export interface FooterConfig {
   }[];
 }
 
+export interface GalleryConfig {
+  title: string;
+  subtitle?: string;
+  images: { url: string; title?: string; description?: string }[];
+}
+
+export interface PricingTableConfig {
+  title: string;
+  subtitle?: string;
+  items: { name: string; price: string; description?: string; features?: string[] }[];
+}
+
 export interface WebsiteConfig {
   meta: MetaConfig;
   branding: BrandingConfig;
   hero: HeroConfig;
   services: ServicesConfig;
   about: AboutConfig;
-  testimonials: TestimonialsConfig;
-  contact: ContactConfig;
+  testimonials?: TestimonialsConfig;
+  contact?: ContactConfig;
   booking?: BookingConfig;
+  gallery?: GalleryConfig;
+  pricingTable?: PricingTableConfig;
   localSEO: LocalSEOConfig;
   trustSignals: TrustSignalsConfig;
   footer: FooterConfig;
@@ -138,6 +152,7 @@ export interface WebsiteConfigGenerationInput {
       phone: boolean;
       booking: boolean;
     };
+    desiredFeatures?: string[];
     logoUrl?: string;
     imageAssets?: {
       hero?: string;

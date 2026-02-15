@@ -229,7 +229,7 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
       </section>
 
       {/* Testimonials - Elegant Cards */}
-      {config.testimonials.items.length > 0 && (
+      {config.testimonials && config.testimonials.items.length > 0 && (
         <section id="testimonials" className="py-32 px-6">
           <div className="max-w-7xl mx-auto">
             <div className="text-center mb-20">
@@ -281,105 +281,107 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
       )}
 
       {/* Contact Section - Elegant Form */}
-      <section id="contact" className="py-32 px-6 bg-neutral-950">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-16">
-            <span
-              className="text-sm tracking-[0.3em] uppercase block mb-4"
-              style={{ color: primaryColor }}
-            >
-              Get in Touch
-            </span>
-            <h2 className="text-4xl md:text-5xl font-serif mb-6">
-              {config.contact.title}
-            </h2>
-            {config.contact.subtitle && (
-              <p className="text-white/60">{config.contact.subtitle}</p>
-            )}
-          </div>
-          <form onSubmit={handleSubmit} className="space-y-8">
-            <div className="grid md:grid-cols-2 gap-8">
-              <div>
-                <label className="block text-sm tracking-widest uppercase mb-3 text-white/60">
-                  Name
-                </label>
-                <input
-                  type="text"
-                  name="name"
-                  required
-                  className="w-full px-0 py-4 bg-transparent border-0 border-b border-white/30 focus:border-white outline-none text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-sm tracking-widest uppercase mb-3 text-white/60">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  name="email"
-                  required
-                  className="w-full px-0 py-4 bg-transparent border-0 border-b border-white/30 focus:border-white outline-none text-white"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm tracking-widest uppercase mb-3 text-white/60">
-                Phone
-              </label>
-              <input
-                type="tel"
-                name="phone"
-                className="w-full px-0 py-4 bg-transparent border-0 border-b border-white/30 focus:border-white outline-none text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-sm tracking-widest uppercase mb-3 text-white/60">
-                Message
-              </label>
-              <textarea
-                name="message"
-                rows={4}
-                className="w-full px-0 py-4 bg-transparent border-0 border-b border-white/30 focus:border-white outline-none text-white resize-none"
-              />
-            </div>
-            <div className="text-center pt-8">
-              <button
-                type="submit"
-                className="px-16 py-5 text-sm tracking-[0.2em] uppercase border-2 transition-all hover:bg-white hover:text-black"
-                style={{ borderColor: primaryColor }}
+      {config.contact && (
+        <section id="contact" className="py-32 px-6 bg-neutral-950">
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-16">
+              <span
+                className="text-sm tracking-[0.3em] uppercase block mb-4"
+                style={{ color: primaryColor }}
               >
-                Send Inquiry
-              </button>
+                Get in Touch
+              </span>
+              <h2 className="text-4xl md:text-5xl font-serif mb-6">
+                {config.contact.title}
+              </h2>
+              {config.contact.subtitle && (
+                <p className="text-white/60">{config.contact.subtitle}</p>
+              )}
             </div>
-          </form>
+            <form onSubmit={handleSubmit} className="space-y-8">
+              <div className="grid md:grid-cols-2 gap-8">
+                <div>
+                  <label className="block text-sm tracking-widest uppercase mb-3 text-white/60">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    name="name"
+                    required
+                    className="w-full px-0 py-4 bg-transparent border-0 border-b border-white/30 focus:border-white outline-none text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm tracking-widest uppercase mb-3 text-white/60">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    name="email"
+                    required
+                    className="w-full px-0 py-4 bg-transparent border-0 border-b border-white/30 focus:border-white outline-none text-white"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm tracking-widest uppercase mb-3 text-white/60">
+                  Phone
+                </label>
+                <input
+                  type="tel"
+                  name="phone"
+                  className="w-full px-0 py-4 bg-transparent border-0 border-b border-white/30 focus:border-white outline-none text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-sm tracking-widest uppercase mb-3 text-white/60">
+                  Message
+                </label>
+                <textarea
+                  name="message"
+                  rows={4}
+                  className="w-full px-0 py-4 bg-transparent border-0 border-b border-white/30 focus:border-white outline-none text-white resize-none"
+                />
+              </div>
+              <div className="text-center pt-8">
+                <button
+                  type="submit"
+                  className="px-16 py-5 text-sm tracking-[0.2em] uppercase border-2 transition-all hover:bg-white hover:text-black"
+                  style={{ borderColor: primaryColor }}
+                >
+                  Send Inquiry
+                </button>
+              </div>
+            </form>
 
-          {/* Contact Details */}
-          <div className="mt-20 pt-20 border-t border-white/10 grid md:grid-cols-3 gap-10 text-center">
-            {config.contact.email && (
-              <div>
-                <p className="text-sm tracking-widest uppercase text-white/40 mb-3">Email</p>
-                <a href={`mailto:${config.contact.email}`} className="text-white hover:underline">
-                  {config.contact.email}
-                </a>
-              </div>
-            )}
-            {config.contact.phone && (
-              <div>
-                <p className="text-sm tracking-widest uppercase text-white/40 mb-3">Phone</p>
-                <a href={`tel:${config.contact.phone}`} className="text-white hover:underline">
-                  {config.contact.phone}
-                </a>
-              </div>
-            )}
-            {config.contact.address && (
-              <div>
-                <p className="text-sm tracking-widest uppercase text-white/40 mb-3">Location</p>
-                <span className="text-white">{config.contact.address}</span>
-              </div>
-            )}
+            {/* Contact Details */}
+            <div className="mt-20 pt-20 border-t border-white/10 grid md:grid-cols-3 gap-10 text-center">
+              {config.contact.email && (
+                <div>
+                  <p className="text-sm tracking-widest uppercase text-white/40 mb-3">Email</p>
+                  <a href={`mailto:${config.contact.email}`} className="text-white hover:underline">
+                    {config.contact.email}
+                  </a>
+                </div>
+              )}
+              {config.contact.phone && (
+                <div>
+                  <p className="text-sm tracking-widest uppercase text-white/40 mb-3">Phone</p>
+                  <a href={`tel:${config.contact.phone}`} className="text-white hover:underline">
+                    {config.contact.phone}
+                  </a>
+                </div>
+              )}
+              {config.contact.address && (
+                <div>
+                  <p className="text-sm tracking-widest uppercase text-white/40 mb-3">Location</p>
+                  <span className="text-white">{config.contact.address}</span>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Booking Section */}
       {config.booking && (

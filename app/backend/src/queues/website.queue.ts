@@ -35,6 +35,7 @@ export interface WebsiteGenerationJobData {
       phone: boolean;
       booking: boolean;
     };
+    desiredFeatures?: string[];
     logoUrl?: string;
   };
   sourceUrl?: string;

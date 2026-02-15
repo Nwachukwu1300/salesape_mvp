@@ -176,7 +176,7 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
       </section>
 
       {/* Testimonials */}
-      {config.testimonials.items.length > 0 && (
+      {config.testimonials && config.testimonials.items.length > 0 && (
         <section id="testimonials" className="py-20 px-4 bg-white">
           <div className="max-w-6xl mx-auto">
             <h2 className="text-3xl md:text-4xl font-bold text-center mb-4">
@@ -232,74 +232,76 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
       )}
 
       {/* Contact Section */}
-      <section id="contact" className="py-20 px-4" style={{ backgroundColor: secondaryColor }}>
-        <div className="max-w-4xl mx-auto">
-          <h2 className="text-3xl md:text-4xl font-bold text-center text-white mb-4">
-            {config.contact.title}
-          </h2>
-          {config.contact.subtitle && (
-            <p className="text-white/80 text-center mb-12">
-              {config.contact.subtitle}
-            </p>
-          )}
-          <div className="bg-white rounded-2xl shadow-2xl p-8 md:p-12">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid md:grid-cols-2 gap-6">
+      {config.contact && (
+        <section id="contact" className="py-20 px-4" style={{ backgroundColor: secondaryColor }}>
+          <div className="max-w-4xl mx-auto">
+            <h2 className="text-3xl md:text-4xl font-bold text-center text-white mb-4">
+              {config.contact.title}
+            </h2>
+            {config.contact.subtitle && (
+              <p className="text-white/80 text-center mb-12">
+                {config.contact.subtitle}
+              </p>
+            )}
+            <div className="bg-white rounded-2xl shadow-2xl p-8 md:p-12">
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="grid md:grid-cols-2 gap-6">
+                  <input
+                    type="text"
+                    name="name"
+                    placeholder="Your Name"
+                    required
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  />
+                  <input
+                    type="email"
+                    name="email"
+                    placeholder="Your Email"
+                    required
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                  />
+                </div>
                 <input
-                  type="text"
-                  name="name"
-                  placeholder="Your Name"
-                  required
+                  type="tel"
+                  name="phone"
+                  placeholder="Your Phone (optional)"
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                 />
-                <input
-                  type="email"
-                  name="email"
-                  placeholder="Your Email"
-                  required
-                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                <textarea
+                  name="message"
+                  rows={4}
+                  placeholder="Your Message"
+                  className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
                 />
-              </div>
-              <input
-                type="tel"
-                name="phone"
-                placeholder="Your Phone (optional)"
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-              />
-              <textarea
-                name="message"
-                rows={4}
-                placeholder="Your Message"
-                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
-              />
-              <button
-                type="submit"
-                className="w-full py-4 text-lg font-semibold rounded-lg text-white transition-all hover:opacity-90"
-                style={{ backgroundColor: primaryColor }}
-              >
-                Send Message
-              </button>
-            </form>
+                <button
+                  type="submit"
+                  className="w-full py-4 text-lg font-semibold rounded-lg text-white transition-all hover:opacity-90"
+                  style={{ backgroundColor: primaryColor }}
+                >
+                  Send Message
+                </button>
+              </form>
 
-            {/* Contact Info */}
-            <div className="mt-8 pt-8 border-t border-gray-200 grid md:grid-cols-3 gap-4 text-center">
-              {config.contact.email && (
-                <a href={`mailto:${config.contact.email}`} className="text-gray-600 hover:text-gray-900">
-                  {config.contact.email}
-                </a>
-              )}
-              {config.contact.phone && (
-                <a href={`tel:${config.contact.phone}`} className="text-gray-600 hover:text-gray-900">
-                  {config.contact.phone}
-                </a>
-              )}
-              {config.contact.address && (
-                <span className="text-gray-600">{config.contact.address}</span>
-              )}
+              {/* Contact Info */}
+              <div className="mt-8 pt-8 border-t border-gray-200 grid md:grid-cols-3 gap-4 text-center">
+                {config.contact.email && (
+                  <a href={`mailto:${config.contact.email}`} className="text-gray-600 hover:text-gray-900">
+                    {config.contact.email}
+                  </a>
+                )}
+                {config.contact.phone && (
+                  <a href={`tel:${config.contact.phone}`} className="text-gray-600 hover:text-gray-900">
+                    {config.contact.phone}
+                  </a>
+                )}
+                {config.contact.address && (
+                  <span className="text-gray-600">{config.contact.address}</span>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Booking Section */}
       {config.booking && (

@@ -35,6 +35,7 @@ export function WebsitePreview() {
   const [availableTemplates, setAvailableTemplates] = useState<any[]>([]);
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [branding, setBranding] = useState<any | null>(null);
+  const [desiredFeatures, setDesiredFeatures] = useState<string[]>([]);
   const [showTestimonialForm, setShowTestimonialForm] = useState(false);
   const [newTestimonial, setNewTestimonial] = useState({
     clientName: '',
@@ -46,6 +47,10 @@ export function WebsitePreview() {
   const [loadingTestimonial, setLoadingTestimonial] = useState(false);
 
   const API_BASE = ((import.meta.env as any).VITE_API_URL || 'http://localhost:3001').replace(/\/+$/g, '');
+
+  // Helper to check if a feature was selected
+  const hasFeature = (feature: string) =>
+    desiredFeatures.some(f => f.toLowerCase().includes(feature.toLowerCase()));
 
   // Helper to ensure template has all required style properties
   const getTemplateStyle = (tpl: any) => {
@@ -94,10 +99,12 @@ export function WebsitePreview() {
           console.log('Template IDs:', t.templates?.map((tpl: any) => tpl.id));
           console.log('Testimonials received:', t.testimonials?.length || 0);
           console.log('Branding data:', t.branding);
+          console.log('🎯 Desired features:', t.desiredFeatures);
           setTemplate(t.recommended || t.templates?.[0] || null);
           setAvailableTemplates(t.templates || []);
           setTestimonials(t.testimonials || []);
           setBranding(t.branding || null);
+          setDesiredFeatures(t.desiredFeatures || []);
         } else {
           console.error('❌ Template fetch failed:', tplRes.status, tplRes.statusText);
           const errText = await tplRes.text();
@@ -548,8 +555,8 @@ export function WebsitePreview() {
         <main className="flex-1 p-8">
           <div className="max-w-6xl mx-auto">
             <div
-              className={`bg-white rounded-lg shadow-2xl overflow-hidden transition-all duration-300 ${
-                viewMode === 'mobile' ? 'max-w-[375px] mx-auto' : ''
+              className={`bg-white rounded-lg shadow-2xl transition-all duration-300 ${
+                viewMode === 'mobile' ? 'max-w-[375px] mx-auto overflow-y-auto' : 'overflow-hidden'
               }`}
               style={{
                 height: viewMode === 'mobile' ? '667px' : 'auto',
@@ -696,10 +703,13 @@ export function WebsitePreview() {
                   }
                   
                   if (s.type === 'gallery-grid') {
+                    // Only show if gallery/portfolio feature was selected
+                    if (!hasFeature('gallery') && !hasFeature('portfolio')) return null;
+
                     const images = branding?.images || [];
                     // Show real images if available, otherwise show placeholders
                     const displayItems = images.length > 0 ? images : [1, 2, 3, 4, 5, 6];
-                    
+
                     return (
                       <section key={idx} className="p-8 md:p-12" style={{ backgroundColor: bgColor }}>
                         <h2 className="text-4xl font-bold mb-2" style={{ color: template.style.accent }}>{s.heading}</h2>
@@ -735,14 +745,17 @@ export function WebsitePreview() {
                   }
 
                   if (s.type === 'testimonial-carousel') {
+                    // Only show if testimonial feature was selected
+                    if (!hasFeature('testimonial')) return null;
+
                     // Use real testimonials from API if available, otherwise use template items as fallback
-                    const displayTestimonials = testimonials && testimonials.length > 0 
-                      ? testimonials 
+                    const displayTestimonials = testimonials && testimonials.length > 0
+                      ? testimonials
                       : (s.items || []).map((text: string, i: number) => ({
                           clientName: `Client ${i + 1}`,
                           content: text
                         }));
-                    
+
                     return (
                       <section key={idx} className="p-8 md:p-12" style={{ backgroundColor: bgColor }}>
                         <h2 className="text-3xl font-bold mb-12 text-center">{s.heading}</h2>
@@ -854,6 +867,79 @@ export function WebsitePreview() {
                     );
                   }
 
+                  if (s.type === 'pricing-table') {
+                    // Only show if pricing feature was selected
+                    if (!hasFeature('pricing')) return null;
+
+                    return (
+                      <section key={idx} className="p-8 md:p-12" style={{ backgroundColor: bgColor }}>
+                        <h2 className="text-3xl font-bold mb-4 text-center" style={{ color: template.style.accent }}>{s.heading}</h2>
+                        {s.content && <p className="text-center mb-12" style={{ color: textColor }}>{s.content}</p>}
+                        <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+                          <div className="p-6 rounded-lg text-center" style={{ backgroundColor: template.style.secondary }}>
+                            <h3 className="text-xl font-bold mb-2" style={{ color: textColor }}>Basic</h3>
+                            <p className="text-3xl font-bold mb-4" style={{ color: template.style.accent }}>$99</p>
+                            <p style={{ color: textColor }} className="text-sm">Perfect for getting started</p>
+                          </div>
+                          <div className="p-6 rounded-lg text-center border-2" style={{ backgroundColor: template.style.bgColor, borderColor: template.style.accent }}>
+                            <h3 className="text-xl font-bold mb-2" style={{ color: textColor }}>Professional</h3>
+                            <p className="text-3xl font-bold mb-4" style={{ color: template.style.accent }}>$199</p>
+                            <p style={{ color: textColor }} className="text-sm">Most popular choice</p>
+                          </div>
+                          <div className="p-6 rounded-lg text-center" style={{ backgroundColor: template.style.secondary }}>
+                            <h3 className="text-xl font-bold mb-2" style={{ color: textColor }}>Enterprise</h3>
+                            <p className="text-3xl font-bold mb-4" style={{ color: template.style.accent }}>Custom</p>
+                            <p style={{ color: textColor }} className="text-sm">Contact us for details</p>
+                          </div>
+                        </div>
+                      </section>
+                    );
+                  }
+
+                  if (s.type === 'blog-preview') {
+                    // Only show if blog feature was selected
+                    if (!hasFeature('blog')) return null;
+
+                    return (
+                      <section key={idx} className="p-8 md:p-12" style={{ backgroundColor: bgColor }}>
+                        <h2 className="text-3xl font-bold mb-4 text-center" style={{ color: template.style.accent }}>{s.heading}</h2>
+                        {s.content && <p className="text-center mb-12" style={{ color: textColor }}>{s.content}</p>}
+                        <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                          {[1, 2, 3].map((i) => (
+                            <div key={i} className="rounded-lg overflow-hidden" style={{ backgroundColor: template.style.secondary }}>
+                              <div className="h-40 bg-gradient-to-br from-gray-200 to-gray-300" />
+                              <div className="p-4">
+                                <p className="text-xs mb-2" style={{ color: template.style.accent }}>Blog Post</p>
+                                <h3 className="font-bold mb-2" style={{ color: textColor }}>Article Title {i}</h3>
+                                <p className="text-sm" style={{ color: textColor, opacity: 0.7 }}>A preview of your blog content will appear here...</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    );
+                  }
+
+                  if (s.type === 'live-chat') {
+                    // Only show if live chat feature was selected
+                    if (!hasFeature('chat')) return null;
+
+                    return (
+                      <section key={idx} className="p-8 md:p-12" style={{ backgroundColor: template.style.accent }}>
+                        <div className="max-w-2xl mx-auto text-center text-white">
+                          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/20 flex items-center justify-center">
+                            <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+                            </svg>
+                          </div>
+                          <h2 className="text-2xl font-bold mb-2">{s.heading}</h2>
+                          <p className="opacity-90 mb-4">{s.content}</p>
+                          <p className="text-sm opacity-75">Live chat widget will appear in the bottom-right corner</p>
+                        </div>
+                      </section>
+                    );
+                  }
+
                   // Default section
                   return (
                     <section key={idx} className="p-8 md:p-12 border-b border-gray-100">
@@ -865,7 +951,8 @@ export function WebsitePreview() {
                   );
                 })}
 
-                {/* Lead Capture Form */}
+                {/* Lead Capture Form - only if Contact Form feature selected */}
+                {hasFeature('contact') && (
                 <section className="p-8 md:p-12 relative" style={{ backgroundColor: '#f4f0e5' }}>
                   {editMode && (
                     <div className="absolute top-4 right-4 z-20">
@@ -957,8 +1044,10 @@ export function WebsitePreview() {
                     </Card>
                   </div>
                 </section>
+                )}
 
-                {/* Booking Calendar Embed */}
+                {/* Booking Calendar Embed - only if Online Booking feature selected */}
+                {hasFeature('booking') && (
                 <section className="p-8 md:p-12 relative">
                   {editMode && (
                     <div className="absolute top-4 right-4 z-20">
@@ -989,6 +1078,7 @@ export function WebsitePreview() {
                     </Card>
                   </div>
                 </section>
+                )}
 
                 {/* Footer - Template Styled */}
                 <footer style={{ backgroundColor: template?.style?.bgColor || '#1a202c', color: template?.style?.textColor || '#fff' }} className="p-8 md:p-12">

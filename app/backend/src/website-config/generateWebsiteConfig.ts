@@ -8,6 +8,8 @@ import type {
   WebsiteConfigGenerationInput,
   ServiceItem,
   TestimonialItem,
+  GalleryConfig,
+  PricingTableConfig,
 } from './website-config.types.js';
 import { getTemplateById } from '../templates/templates.js';
 
@@ -74,9 +76,13 @@ function generateCtaText(contactPreferences: { email: boolean; phone: boolean; b
 }
 
 /**
- * Generate service items with descriptions
+ * Generate service items with descriptions and images
  */
-function generateServiceItems(services: string[], brandTone: string): ServiceItem[] {
+function generateServiceItems(
+  services: string[],
+  brandTone: string,
+  galleryImages?: string[]
+): ServiceItem[] {
   const toneDescriptions: Record<string, (service: string) => string> = {
     professional: (s) => `Our expert team delivers exceptional ${s.toLowerCase()} with precision and reliability.`,
     friendly: (s) => `We love providing ${s.toLowerCase()} that makes a real difference in your life!`,
@@ -87,9 +93,13 @@ function generateServiceItems(services: string[], brandTone: string): ServiceIte
 
   const descriptionGenerator = toneDescriptions[brandTone] || toneDescriptions.professional;
 
-  return services.map((service) => ({
+  return services.map((service, index) => ({
     name: service,
     description: descriptionGenerator(service),
+    // Assign gallery images to services, cycling through available images
+    image: galleryImages && galleryImages.length > 0
+      ? galleryImages[index % galleryImages.length]
+      : undefined,
   }));
 }
 
@@ -272,9 +282,14 @@ export async function generateWebsiteConfig(
     trustSignals,
     seoKeywords,
     contactPreferences,
+    desiredFeatures = [],
     logoUrl,
     imageAssets,
   } = businessUnderstanding;
+
+  // Helper to check if a feature is enabled
+  const hasFeature = (feature: string) =>
+    desiredFeatures.some(f => f.toLowerCase().includes(feature.toLowerCase()));
 
   // Determine hero image
   let heroImage = imageAssets?.hero || scrapedData?.images?.[0] || getDefaultHeroImage(category);
@@ -305,7 +320,7 @@ export async function generateWebsiteConfig(
     services: {
       title: 'Our Services',
       subtitle: `What ${name} Can Do For You`,
-      items: generateServiceItems(services, brandTone),
+      items: generateServiceItems(services, brandTone, imageAssets?.gallery),
     },
     about: {
       title: `About ${name}`,
@@ -313,12 +328,14 @@ export async function generateWebsiteConfig(
       image: imageAssets?.gallery?.[0] || scrapedData?.images?.[1],
       highlights: trustSignals.slice(0, 4),
     },
-    testimonials: {
+    // Testimonials - only if feature selected
+    testimonials: hasFeature('testimonial') ? {
       title: 'What Our Clients Say',
       subtitle: 'Real feedback from real customers',
       items: generatePlaceholderTestimonials(name, services),
-    },
-    contact: {
+    } : undefined,
+    // Contact form - only if feature selected
+    contact: hasFeature('contact') ? {
       title: 'Get In Touch',
       subtitle: 'We\'d love to hear from you',
       email: scrapedData?.email,
@@ -326,12 +343,32 @@ export async function generateWebsiteConfig(
       address: location,
       formFields: ['name', 'email', 'phone', 'message'],
       showMap: !!location,
-    },
-    booking: contactPreferences.booking ? {
+    } : undefined,
+    // Booking - only if feature selected
+    booking: (hasFeature('booking') || contactPreferences.booking) ? {
       title: 'Book an Appointment',
       subtitle: 'Choose a time that works for you',
       provider: 'internal',
       availableSlots: true,
+    } : undefined,
+    // Gallery - only if feature selected
+    gallery: hasFeature('gallery') ? {
+      title: 'Our Work',
+      subtitle: 'See what we\'ve accomplished',
+      images: (imageAssets?.gallery || []).map((url, i) => ({
+        url,
+        title: `Project ${i + 1}`,
+      })),
+    } : undefined,
+    // Pricing table - only if feature selected
+    pricingTable: hasFeature('pricing') ? {
+      title: 'Our Pricing',
+      subtitle: 'Transparent pricing for all services',
+      items: services.slice(0, 4).map(service => ({
+        name: service,
+        price: 'Contact for quote',
+        description: `Professional ${service.toLowerCase()} services`,
+      })),
     } : undefined,
     localSEO: {
       location,
