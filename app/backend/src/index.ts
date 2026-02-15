@@ -47,6 +47,7 @@ import {
   extractJSONFromResponse,
 } from './utils/conversation-schema.js';
 import type { ConversationMessage } from './utils/conversation-schema.js';
+import { getStockImagesForCategory } from './utils/unsplash.js';
 import {
   getCurrentStage,
   generateNextQuestion,
@@ -2996,7 +2997,25 @@ app.get('/businesses/:id/template', authenticateToken, async (req: AuthRequest, 
     const brandingData = ((business.generatedConfig as Record<string, any>)?.branding) || {};
 
     // Get imageAssets from business record
-    const imageAssets = (business.imageAssets as { hero?: string; gallery?: string[] }) || {};
+    let imageAssets = (business.imageAssets as { hero?: string; gallery?: string[] }) || {};
+
+    // If no user images, fetch stock images from Unsplash for preview
+    if (!imageAssets.gallery?.length || !imageAssets.hero) {
+      try {
+        const services = (analysis as any)?.services || [];
+        const stockImages = await getStockImagesForCategory(businessType, services);
+        imageAssets = {
+          hero: imageAssets.hero || stockImages.hero || undefined,
+          gallery: imageAssets.gallery?.length ? imageAssets.gallery : stockImages.gallery,
+        };
+        console.log('📸 Fetched Unsplash stock images for preview:', {
+          hero: !!stockImages.hero,
+          galleryCount: stockImages.gallery?.length || 0
+        });
+      } catch (unsplashErr) {
+        console.log('Unsplash fetch skipped:', unsplashErr);
+      }
+    }
 
     // Get desiredFeatures from questionnaire
     const questionnaire = (analysis as any)?.questionnaire || {};

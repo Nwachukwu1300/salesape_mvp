@@ -12,6 +12,7 @@ import type {
   PricingTableConfig,
 } from './website-config.types.js';
 import { getTemplateById } from '../templates/templates.js';
+import { getStockImagesForCategory } from '../utils/unsplash.js';
 
 /**
  * Generate a compelling headline from business data
@@ -291,8 +292,36 @@ export async function generateWebsiteConfig(
   const hasFeature = (feature: string) =>
     desiredFeatures.some(f => f.toLowerCase().includes(feature.toLowerCase()));
 
-  // Determine hero image
-  let heroImage = imageAssets?.hero || scrapedData?.images?.[0] || getDefaultHeroImage(category);
+  // Fetch stock images from Unsplash if no user images provided
+  let stockImages: { hero: string | null; gallery: string[]; services: string[] } = {
+    hero: null,
+    gallery: [],
+    services: [],
+  };
+
+  const needsStockImages = !imageAssets?.hero || !imageAssets?.gallery?.length;
+  if (needsStockImages) {
+    try {
+      stockImages = await getStockImagesForCategory(category, services);
+    } catch (error) {
+      console.error('Failed to fetch stock images:', error);
+    }
+  }
+
+  // Determine hero image - prioritize user images, then stock, then defaults
+  let heroImage = imageAssets?.hero || stockImages.hero || scrapedData?.images?.[0] || getDefaultHeroImage(category);
+
+  // Combine gallery images - user images first, then stock images
+  const galleryImages = [
+    ...(imageAssets?.gallery || []),
+    ...stockImages.gallery,
+  ].slice(0, 8); // Limit to 8 images
+
+  // Service images - user images first, then stock images
+  const serviceImages = [
+    ...(imageAssets?.gallery || []),
+    ...stockImages.services,
+  ];
 
   // Generate the config
   const config: WebsiteConfig = {
@@ -320,12 +349,12 @@ export async function generateWebsiteConfig(
     services: {
       title: 'Our Services',
       subtitle: `What ${name} Can Do For You`,
-      items: generateServiceItems(services, brandTone, imageAssets?.gallery),
+      items: generateServiceItems(services, brandTone, serviceImages.length > 0 ? serviceImages : undefined),
     },
     about: {
       title: `About ${name}`,
       content: generateAboutContent(name, valueProposition, targetAudience, trustSignals, brandTone),
-      image: imageAssets?.gallery?.[0] || scrapedData?.images?.[1],
+      image: imageAssets?.gallery?.[0] || stockImages.gallery[0] || scrapedData?.images?.[1],
       highlights: trustSignals.slice(0, 4),
     },
     // Testimonials - only if feature selected
@@ -355,7 +384,7 @@ export async function generateWebsiteConfig(
     gallery: hasFeature('gallery') ? {
       title: 'Our Work',
       subtitle: 'See what we\'ve accomplished',
-      images: (imageAssets?.gallery || []).map((url, i) => ({
+      images: galleryImages.map((url, i) => ({
         url,
         title: `Project ${i + 1}`,
       })),
