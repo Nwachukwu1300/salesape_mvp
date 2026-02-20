@@ -1,12 +1,23 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Logo } from '../components/Logo';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import { ThemeToggle } from '../components/ThemeToggle';
 import { Sparkles, Chrome, Mail, X, CheckCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'sonner';
+import { getAccessToken } from '../lib/supabase';
+
+// Dynamic API URL: uses the same host as the frontend but on port 3001
+const getApiUrl = () => {
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    return `http://${hostname}:3001`;
+  }
+  return import.meta.env.VITE_API_URL || 'http://localhost:3001';
+};
+
+const API_URL = getApiUrl();
 
 export function AuthScreen() {
   const navigate = useNavigate();
@@ -19,6 +30,16 @@ export function AuthScreen() {
   const [resetEmail, setResetEmail] = useState('');
   const [resetEmailSent, setResetEmailSent] = useState(false);
   const [error, setError] = useState('');
+  const [isFirstVisit, setIsFirstVisit] = useState(false);
+
+  // Check if first visit using localStorage (client-side)
+  useEffect(() => {
+    const hasVisitedAuthScreen = localStorage.getItem('visited-auth-screen');
+    if (!hasVisitedAuthScreen) {
+      setIsFirstVisit(true);
+      localStorage.setItem('visited-auth-screen', 'true');
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,15 +65,22 @@ export function AuthScreen() {
         console.log('handleSubmit: Sign in succeeded');
       }
       
-      // Verify token exists before navigation
-      const token = localStorage.getItem('supabase.auth.token');
+      // Verify token exists in memory before navigation
+      const token = getAccessToken();
       console.log('handleSubmit: Token check before navigation -', token ? 'FOUND' : 'NOT FOUND');
+      
+      if (!token) {
+        throw new Error('No authentication token found - sign in failed');
+      }
       
       navigate('/dashboard');
     } catch (err: any) {
       const message = err?.message || err?.error || 'Authentication failed';
       console.error('handleSubmit: Auth error -', message);
       setError(message);
+      toast.error('Authentication Failed', {
+        description: message,
+      });
     }
   };
 
@@ -79,9 +107,71 @@ export function AuthScreen() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gray-50 dark:bg-gray-900" style={{ backgroundColor: '#f4f0e5' }}>
-      <div className="absolute top-4 right-4">
-        <ThemeToggle />
+      <style>{`
+        @keyframes bounce-highlight {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-8px); }
+        }
+        @keyframes glow-pulse {
+          0%, 100% { 
+            filter: drop-shadow(0 0 6px rgba(247, 36, 222, 0.8)) drop-shadow(0 0 12px rgba(247, 36, 222, 0.6)) drop-shadow(0 0 18px rgba(247, 36, 222, 0.4));
+          }
+          50% { 
+            filter: drop-shadow(0 0 10px rgba(247, 36, 222, 1)) drop-shadow(0 0 20px rgba(247, 36, 222, 0.8)) drop-shadow(0 0 30px rgba(247, 36, 222, 0.6));
+          }
+        }
+        .audit-button-wrapper {
+          animation: glow-pulse 2s ease-in-out infinite !important;
+          display: inline-block;
+          will-change: filter;
+        }
+        .audit-button-wrapper.bounce {
+          animation: bounce-highlight 0.6s ease-in-out infinite, glow-pulse 2s ease-in-out infinite !important;
+        }
+        .audit-button-wrapper.no-bounce {
+          animation: glow-pulse 2s ease-in-out infinite !important;
+        }
+        
+        /* Responsive layout for audit controls */
+        #audit-controls {
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+          align-items: flex-end;
+        }
+        
+        @media (min-width: 1024px) {
+          #audit-controls {
+            flex-direction: row;
+            align-items: center;
+            gap: 0.75rem;
+          }
+        }
+      `}</style>
+      
+      {/* Top Right Controls - Button above Toggle on mobile, side-by-side on large screens */}
+      <div id="audit-controls" className="absolute top-4 right-4 z-50 pointer-events-auto">
+        {/* Audit Button */}
+        <div 
+          className={`audit-button-wrapper ${isFirstVisit ? 'bounce' : 'no-bounce'}`}
+          key={`bounce-${isFirstVisit}`}
+        >
+          <Button
+            onClick={() => navigate('/audit')}
+            variant="outline"
+            size="sm"
+            className="text-xs px-2 sm:px-3 py-1 h-auto whitespace-nowrap"
+            style={{
+              backgroundColor: 'rgba(247, 36, 222, 0.1)',
+              borderColor: 'rgba(247, 36, 222, 0.6)',
+              boxShadow: '0 0 10px rgba(247, 36, 222, 0.8), 0 0 20px rgba(247, 36, 222, 0.6), 0 0 30px rgba(247, 36, 222, 0.4)',
+            } as React.CSSProperties}
+          >
+            Free SEO Audit
+          </Button>
+        </div>
       </div>
+      
       <div className="w-full max-w-md">
         {/* Logo and Branding */}
         <div className="text-center mb-8">
@@ -102,30 +192,44 @@ export function AuthScreen() {
             {isSignUp && (
               <Input
                 type="text"
+                name="fullName"
                 label="Full name"
                 placeholder="John Smith"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isSignUp) handleSubmit(e as any);
+                }}
                 required
               />
             )}
             
             <Input
               type="email"
+              name="email"
               label="Email address"
               placeholder="you@business.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSubmit(e as any);
+              }}
               required
+              autoComplete="email"
             />
             
             <Input
               type="password"
+              name="password"
               label="Password"
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSubmit(e as any);
+              }}
               required
+              autoComplete={isSignUp ? 'new-password' : 'current-password'}
             />
 
             {error && (
@@ -208,7 +312,7 @@ export function AuthScreen() {
             <div>•</div>
             <div>No Credit Card Required</div>
             <div>•</div>
-            <div>2 min setup</div>
+            <div>5 min setup</div>
           </div>
         </div>
       </div>

@@ -4,7 +4,6 @@ import { Logo } from '../components/Logo';
 import { Button } from '../components/Button';
 import { Card, CardContent } from '../components/Card';
 import { Badge } from '../components/Badge';
-import { ThemeToggle } from '../components/ThemeToggle';
 import { 
   ArrowLeft, 
   Eye, 
@@ -132,7 +131,6 @@ export function WebsitePreview() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <ThemeToggle />
               <Button variant="outline" size="sm" className="hidden sm:flex" onClick={() => {
                 const url = business?.publishedUrl;
                 if (url) {
@@ -986,12 +984,13 @@ export function WebsitePreview() {
                           try {
                             if (id) {
                               const token = localStorage.getItem('supabase.auth.token');
+                              const headers: HeadersInit = {
+                                'Content-Type': 'application/json',
+                              };
+                              if (token) headers['Authorization'] = `Bearer ${token}`;
                               const res = await fetch(`${API_BASE}/businesses/${id}/leads`, {
                                 method: 'POST',
-                                headers: {
-                                  'Content-Type': 'application/json',
-                                  Authorization: token ? `Bearer ${token}` : undefined,
-                                },
+                                headers,
                                 body: JSON.stringify(payload),
                               });
                               if (!res.ok) throw new Error('Failed to submit lead');

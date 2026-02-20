@@ -1,13 +1,12 @@
 import { useNavigate } from 'react-router';
-import { Logo } from '../components/Logo';
 import { Button } from '../components/Button';
 import { Card, CardHeader, CardContent } from '../components/Card';
 import { StatCard } from '../components/StatCard';
 import { Badge } from '../components/Badge';
-import { ThemeToggle } from '../components/ThemeToggle';
 import { PricingModal } from '../components/PricingModal';
 import { UpgradePrompt } from '../components/UpgradePrompt';
 import { CalendarIntegrationModal } from '../components/CalendarIntegrationModal';
+import { SidebarNav } from '../components/SidebarNav';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { useAuth } from '../contexts/AuthContext';
 import { PRICING_PLANS } from '../lib/stripe';
@@ -22,40 +21,41 @@ import {
   TrendingUp, 
   Eye,
   ExternalLink,
-  Settings,
-  LogOut,
-  Zap,
+  Trash2,
   Crown,
-  Trash2
+  Zap
 } from 'lucide-react';
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { user, signOut } = useAuth();
   const { currentPlan, canCreateWebsite, canRunSEOAudit, usage, seoAuditsRemaining, refreshUsage } = useSubscription();
   const [showPricing, setShowPricing] = useState(false);
   const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [websites, setWebsites] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const { user, signOut } = useAuth();
+  const [dashboardStats, setDashboardStats] = useState<any>(null);
 
   // Fetch user's websites from backend
   React.useEffect(() => {
-    const fetchWebsites = async () => {
+    const fetchData = async () => {
       try {
         setLoading(true);
         const token = localStorage.getItem('supabase.auth.token');
         if (!token) {
           setWebsites([]);
+          setDashboardStats(null);
           return;
         }
 
-        const response = await fetch('http://localhost:3001/businesses', {
+        // Fetch businesses list
+        const businessesResponse = await fetch('http://localhost:3001/businesses', {
           headers: { 'Authorization': `Bearer ${token}` },
         });
 
-        if (response.ok) {
-          const data = await response.json();
+        if (businessesResponse.ok) {
+          const data = await businessesResponse.json();
           // Map business records to website format for display
           const websitesList = (Array.isArray(data) ? data : []).map((business: any) => ({
             id: business.id,
@@ -68,15 +68,31 @@ export function Dashboard() {
           }));
           setWebsites(websitesList);
         }
+
+        // Fetch dashboard stats
+        try {
+          const statsResponse = await fetch('http://localhost:3001/dashboard/stats', {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          
+          if (statsResponse.ok) {
+            const stats = await statsResponse.json();
+            setDashboardStats(stats.summary || stats);
+          }
+        } catch (statsError) {
+          console.warn('Failed to fetch dashboard stats, using local calculations:', statsError);
+          // Stats will be calculated from websites array as fallback
+        }
       } catch (error) {
-        console.error('Failed to fetch websites:', error);
+        console.error('Failed to fetch data:', error);
         setWebsites([]);
+        setDashboardStats(null);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchWebsites();
+    fetchData();
   }, []);
 
   const handleCreateWebsite = () => {
@@ -85,19 +101,6 @@ export function Dashboard() {
       return;
     }
     navigate('/create-website');
-  };
-
-  const handleSignOut = async () => {
-    try {
-      if (signOut) {
-        await signOut();
-      }
-      localStorage.clear();
-      navigate('/');
-    } catch (error) {
-      console.error('Sign out error:', error);
-      alert('Error signing out. Please try again.');
-    }
   };
 
   const handleDeleteWebsite = async (websiteId: string, websiteName: string) => {
@@ -140,58 +143,18 @@ export function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Sidebar Navigation */}
+      <SidebarNav currentPath="/dashboard" />
+
       <PricingModal 
         isOpen={showPricing} 
         onClose={() => setShowPricing(false)}
         highlightPlan="pro"
       />
-      
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <Logo size="sm" className="md:hidden" />
-            <Logo size="md" className="hidden md:block" />
-            <div className="flex items-center gap-3">
-              {currentPlan !== 'free' && (
-                <Badge 
-                  variant="warning" 
-                  className="hidden sm:flex"
-                  style={{ backgroundColor: '#f724de', color: 'white', border: 'none' }}
-                >
-                  <Crown className="w-3 h-3" />
-                  {PRICING_PLANS[currentPlan].name}
-                </Badge>
-              )}
-              {currentPlan === 'free' && (
-                <Button 
-                  variant="primary" 
-                  size="sm"
-                  onClick={() => setShowPricing(true)}
-                  className="hidden sm:flex"
-                >
-                  <Crown className="w-4 h-4" />
-                  <span className="hidden lg:inline">Upgrade to Pro</span>
-                  <span className="lg:hidden">Upgrade</span>
-                </Button>
-              )}
-              <ThemeToggle />
-              <Button variant="ghost" size="sm" className="hidden sm:flex">
-                <Settings className="w-4 h-4" />
-                <span className="hidden lg:inline">Settings</span>
-              </Button>
-              <Button variant="ghost" size="sm" className="hidden sm:flex" onClick={handleSignOut}>
-                <LogOut className="w-4 h-4" />
-                <span className="hidden lg:inline">Sign Out</span>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Welcome Section */}
+        {/* Welcome Section with Action Bar */}
         <div className="mb-8 flex items-start justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
@@ -201,16 +164,26 @@ export function Dashboard() {
               Here's what's happening with your websites today
             </p>
           </div>
-          {currentPlan === 'free' && (
-            <Button 
-              variant="primary"
-              onClick={() => setShowPricing(true)}
-              className="hidden md:flex"
-            >
-              <Crown className="w-5 h-5" />
-              Upgrade Now
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {currentPlan !== 'free' && (
+              <Badge 
+                variant="warning"
+                style={{ backgroundColor: '#f724de', color: 'white', border: 'none' }}
+              >
+                <Crown className="w-3 h-3" />
+                {PRICING_PLANS[currentPlan].name}
+              </Badge>
+            )}
+            {currentPlan === 'free' && (
+              <Button 
+                variant="primary"
+                onClick={() => setShowPricing(true)}
+              >
+                <Crown className="w-5 h-5" />
+                Upgrade Now
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Upgrade Prompt for Free Users */}
@@ -270,27 +243,27 @@ export function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <StatCard
               title="Active Websites"
-              value={websites.filter(w => w.status === 'Live').length}
+              value={dashboardStats?.liveWebsites ?? websites.filter(w => w.status === 'Live').length}
               icon={Globe}
-              trend={{ value: `${websites.length} total`, positive: websites.length > 0 }}
+              trend={{ value: `${dashboardStats?.totalWebsites ?? websites.length} total`, positive: (dashboardStats?.totalWebsites ?? websites.length) > 0 }}
             />
             <StatCard
               title="Total Leads"
-              value={websites.reduce((sum, w) => sum + w.leads, 0)}
+              value={dashboardStats?.totalLeads ?? websites.reduce((sum, w) => sum + w.leads, 0)}
               icon={Users}
-              trend={{ value: websites.length > 0 ? '+0 this week' : 'Start with a website', positive: true }}
+              trend={{ value: dashboardStats?.totalLeads ? '+0 this week' : 'Start with a website', positive: true }}
             />
             <StatCard
-              title="Total Bookings"
-              value={websites.reduce((sum, w) => sum + w.bookings, 0)}
+              title="Conversion Rate"
+              value={dashboardStats?.conversionRate ? `${(dashboardStats.conversionRate * 100).toFixed(1)}%` : '0%'}
               icon={TrendingUp}
-              trend={{ value: websites.length > 0 ? '+0 this week' : 'Start with a website', positive: true }}
+              trend={{ value: 'Leads to Bookings', positive: (dashboardStats?.conversionRate ?? 0) > 0 }}
             />
             <StatCard
-              title="Free Audits"
-              value={`${usage.seoAudits}/${PRICING_PLANS[currentPlan].limits.seoAudits}`}
+              title="Avg SEO Score"
+              value={dashboardStats?.avgSeoScore ? Math.round(dashboardStats.avgSeoScore) : 'N/A'}
               icon={Search}
-              trend={{ value: currentPlan === 'free' ? 'Reset monthly' : 'Unlimited', positive: currentPlan !== 'free' }}
+              trend={{ value: 'Domain Authority', positive: (dashboardStats?.avgSeoScore ?? 0) > 50 }}
             />
           </div>
         )}

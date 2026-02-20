@@ -9,6 +9,12 @@ export interface MetaConfig {
   keywords: string[];
   ogImage?: string;
   favicon?: string;
+  canonicalUrl?: string;
+  ogType?: 'website' | 'business.business' | 'article' | 'product';
+  twitterCard?: 'summary' | 'summary_large_image';
+  robots?: string;
+  reviewSchema?: any;
+  aggregateRatingSchema?: any;
 }
 
 export interface BrandingConfig {
@@ -133,6 +139,12 @@ export interface WebsiteConfig {
   footer: FooterConfig;
   templateId: string;
   generatedAt: string;
+  seoConfig?: {
+    sitemapUrl?: string;
+    robotsUrl?: string;
+    aeoOptimized?: boolean;
+    schemaMarkup?: Record<string, any>;
+  };
 }
 
 export interface WebsiteConfigGenerationInput {

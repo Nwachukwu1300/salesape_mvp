@@ -1,16 +1,16 @@
 /**
  * Website Generation Queue
- * Handles async website generation jobs using BullMQ
+ * Handles async website generation jobs using BullMQ (optional if Redis unavailable)
  */
 
-import { Queue, QueueEvents } from 'bullmq';
+import dotenv from 'dotenv';
+// Ensure env vars are loaded before evaluating Redis config
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 
-// Redis connection config
-const connection = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379', 10),
-  password: process.env.REDIS_PASSWORD || undefined,
-};
+import { Queue, QueueEvents } from 'bullmq';
+import { getRedisClient, createRedisClient } from '../utils/redis-client.js';
+let redisAvailable = true; // Flag to track if Redis is available
 
 // Queue name
 const QUEUE_NAME = 'website-generation';
@@ -65,27 +65,44 @@ export type GenerationStep =
 let websiteQueue: Queue<WebsiteGenerationJobData, WebsiteGenerationJobResult> | null = null;
 let queueEvents: QueueEvents | null = null;
 
+// Export function to get connection
+export function getConnection() {
+  return getRedisClient();
+}
+
 /**
  * Get or create the website generation queue
  */
-export function getWebsiteQueue(): Queue<WebsiteGenerationJobData, WebsiteGenerationJobResult> {
+export function getWebsiteQueue(): Queue<WebsiteGenerationJobData, WebsiteGenerationJobResult> | null {
+  // Return null if Redis is not available
+  if (!redisAvailable) {
+    return null;
+  }
+
   if (!websiteQueue) {
-    websiteQueue = new Queue(QUEUE_NAME, {
-      connection,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: 1000,
+    try {
+      createRedisClient();
+      websiteQueue = new Queue(QUEUE_NAME, {
+        connection: getRedisClient(),
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 1000,
+          },
+          removeOnComplete: {
+            count: 100, // Keep last 100 completed jobs
+          },
+          removeOnFail: {
+            count: 50, // Keep last 50 failed jobs
+          },
         },
-        removeOnComplete: {
-          count: 100, // Keep last 100 completed jobs
-        },
-        removeOnFail: {
-          count: 50, // Keep last 50 failed jobs
-        },
-      },
-    });
+      });
+    } catch (err) {
+      console.warn('[Queue] Redis connection failed:', err instanceof Error ? err.message : String(err));
+      redisAvailable = false;
+      return null;
+    }
   }
   return websiteQueue;
 }
@@ -93,9 +110,21 @@ export function getWebsiteQueue(): Queue<WebsiteGenerationJobData, WebsiteGenera
 /**
  * Get queue events for monitoring
  */
-export function getQueueEvents(): QueueEvents {
+export function getQueueEvents(): QueueEvents | null {
+  // Return null if Redis is not available
+  if (!redisAvailable) {
+    return null;
+  }
+
   if (!queueEvents) {
-    queueEvents = new QueueEvents(QUEUE_NAME, { connection });
+    try {
+      createRedisClient();
+      queueEvents = new QueueEvents(QUEUE_NAME, { connection: getRedisClient() });
+    } catch (err) {
+      console.warn('[Queue] Failed to create queue events:', err instanceof Error ? err.message : String(err));
+      redisAvailable = false;
+      return null;
+    }
   }
   return queueEvents;
 }
@@ -107,6 +136,12 @@ export async function enqueueWebsiteGeneration(
   data: WebsiteGenerationJobData
 ): Promise<{ jobId: string }> {
   const queue = getWebsiteQueue();
+
+  // If Redis/queue is not available, return a mock job ID
+  if (!queue) {
+    console.warn('[Queue] Redis not available, returning mock job ID. Website generation will not run async.');
+    return { jobId: `mock-${data.businessId}-${Date.now()}` };
+  }
 
   const job = await queue.add('generate-website', data, {
     jobId: `website-${data.businessId}-${Date.now()}`,
@@ -125,6 +160,15 @@ export async function getJobStatus(jobId: string): Promise<{
   result?: WebsiteGenerationJobResult;
 }> {
   const queue = getWebsiteQueue();
+
+  // If Redis is not available, return completed status for mock jobs
+  if (!queue) {
+    if (jobId.startsWith('mock-')) {
+      return { status: 'completed', progress: 100 };
+    }
+    return { status: 'failed', progress: 0, step: 'Redis not available' };
+  }
+
   const job = await queue.getJob(jobId);
 
   if (!job) {
@@ -153,12 +197,20 @@ export async function getJobStatus(jobId: string): Promise<{
       status = 'queued';
   }
 
-  return {
+  const responseObj: any = {
     status,
     progress,
-    step: (job.data as any).currentStep,
-    result: state === 'completed' ? job.returnvalue : undefined,
   };
+  
+  if (typeof (job.data as any).currentStep === 'string') {
+    responseObj.step = (job.data as any).currentStep;
+  }
+  
+  if (state === 'completed' && job.returnvalue) {
+    responseObj.result = job.returnvalue;
+  }
+  
+  return responseObj;
 }
 
 /**
@@ -166,13 +218,21 @@ export async function getJobStatus(jobId: string): Promise<{
  */
 export async function closeQueue(): Promise<void> {
   if (websiteQueue) {
-    await websiteQueue.close();
+    try {
+      await websiteQueue.close();
+    } catch (err) {
+      console.warn('[Queue] Error closing queue:', err instanceof Error ? err.message : String(err));
+    }
     websiteQueue = null;
   }
   if (queueEvents) {
-    await queueEvents.close();
+    try {
+      await queueEvents.close();
+    } catch (err) {
+      console.warn('[Queue] Error closing queue events:', err instanceof Error ? err.message : String(err));
+    }
     queueEvents = null;
   }
 }
 
-export { QUEUE_NAME, connection };
+export { QUEUE_NAME, redisAvailable };

@@ -1,9 +1,10 @@
-import { ButtonHTMLAttributes } from 'react';
+import React, { ButtonHTMLAttributes } from 'react';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
   size?: 'sm' | 'md' | 'lg';
   children: React.ReactNode;
+  as?: React.ElementType;
 }
 
 export function Button({ 
@@ -11,6 +12,8 @@ export function Button({
   size = 'md', 
   children, 
   className = '',
+  style,
+  as,
   ...props 
 }: ButtonProps) {
   const baseStyles = 'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed';
@@ -28,13 +31,20 @@ export function Button({
     lg: 'px-6 py-3 text-lg',
   };
   
+  const buttonStyle = {
+    ...(variant === 'primary' ? { backgroundColor: '#f724de' } : {}),
+    ...style,
+  };
+  
+  const Comp: any = as || 'button';
+
   return (
-    <button
+    <Comp
       className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`}
-      style={variant === 'primary' ? { backgroundColor: '#f724de' } : undefined}
+      style={buttonStyle}
       {...props}
     >
       {children}
-    </button>
+    </Comp>
   );
 }

@@ -4,7 +4,6 @@ import { Logo } from '../components/Logo';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Card, CardHeader, CardContent } from '../components/Card';
-import { ThemeToggle } from '../components/ThemeToggle';
 import {
   ArrowLeft,
   ArrowRight,
@@ -149,9 +148,6 @@ export function RecapScreen() {
       <header className="border-b border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <Logo />
-          <div className="flex items-center gap-4">
-            <ThemeToggle />
-          </div>
         </div>
       </header>
 

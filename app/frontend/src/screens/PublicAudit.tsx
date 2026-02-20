@@ -1,11 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Logo } from '../components/Logo';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Card, CardHeader, CardContent } from '../components/Card';
 import { ProgressCircle } from '../components/ProgressCircle';
-import { ThemeToggle } from '../components/ThemeToggle';
 import {
   ArrowRight,
   Search,
@@ -33,17 +32,28 @@ interface AuditResult {
 
 export function PublicAudit() {
   const navigate = useNavigate();
-  const [website, setWebsite] = useState('');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [website, setWebsite] = useState('');
   const [isAuditing, setIsAuditing] = useState(false);
   const [auditResults, setAuditResults] = useState<AuditResult | null>(null);
   const [error, setError] = useState('');
+  const [isFirstVisit, setIsFirstVisit] = useState(false);
+
+  // Check if first visit using localStorage (client-side)
+  useEffect(() => {
+    const hasVisitedPublicAudit = localStorage.getItem('visited-public-audit');
+    if (!hasVisitedPublicAudit) {
+      setIsFirstVisit(true);
+      localStorage.setItem('visited-public-audit', 'true');
+    }
+  }, []);
 
   const handleRunAudit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!website.trim()) {
-      setError('Please enter a website URL');
+    if (!name.trim()) {
+      setError('Please enter your name');
       return;
     }
 
@@ -54,6 +64,11 @@ export function PublicAudit() {
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setError('Please enter a valid email address');
+      return;
+    }
+    
+    if (!website.trim()) {
+      setError('Please enter a website URL');
       return;
     }
 
@@ -77,11 +92,15 @@ export function PublicAudit() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
         if (response.status === 429) {
           setError('You can run one free audit per week. Please try again next week.');
         } else {
-          setError(errorData.error || 'Failed to run audit');
+          try {
+            const errorData = await response.json();
+            setError(errorData.error || 'Failed to run audit');
+          } catch {
+            setError(`Error: ${response.statusText}`);
+          }
         }
         setIsAuditing(false);
         return;
@@ -116,7 +135,6 @@ export function PublicAudit() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <Logo />
           <div className="flex items-center gap-4">
-            <ThemeToggle />
             <Button
               onClick={() => navigate('/')}
               variant="outline"
@@ -133,20 +151,20 @@ export function PublicAudit() {
         {!auditResults ? (
           <>
             {/* Hero Section */}
-            <section className="mb-16 text-center">
-              <h1 className="text-4xl sm:text-5xl font-bold text-slate-900 dark:text-white mb-4">
+            <section className="mb-8 sm:mb-16 text-center px-4 sm:px-0">
+              <h1 className={`text-3xl sm:text-4xl md:text-5xl font-bold text-slate-900 dark:text-white mb-3 sm:mb-4 leading-tight ${isFirstVisit ? 'animate-bounce' : ''}`}>
                 Free SEO Audit
               </h1>
-              <p className="text-xl text-slate-600 dark:text-slate-400 mb-8 max-w-2xl mx-auto">
+              <p className="text-base sm:text-lg md:text-xl text-slate-600 dark:text-slate-400 mb-6 sm:mb-8 max-w-2xl mx-auto leading-relaxed">
                 Get instant insights into your website's SEO, performance, and mobile readiness. No credit card needed.
               </p>
-              <p className="text-sm text-slate-500 dark:text-slate-500">
-                Free for one audit per week per IP address
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-500">
+                Free audit per week
               </p>
             </section>
 
             {/* Audit Form */}
-            <div className="max-w-2xl mx-auto mb-16">
+            <div className={`max-w-2xl mx-auto mb-8 sm:mb-16 px-4 sm:px-0 ${isFirstVisit ? 'animate-bounce' : ''}`} style={isFirstVisit ? { animationDelay: '0.1s' } : {}}>
               <Card className="border-2 border-slate-200 dark:border-slate-800">
                 <CardHeader>
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -158,13 +176,13 @@ export function PublicAudit() {
                   <form onSubmit={handleRunAudit} className="space-y-6">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                        Website URL
+                        Your Name
                       </label>
                       <Input
-                        type="url"
-                        placeholder="example.com or https://example.com"
-                        value={website}
-                        onChange={(e) => setWebsite(e.target.value)}
+                        type="text"
+                        placeholder="John Smith"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
                         disabled={isAuditing}
                       />
                     </div>
@@ -178,6 +196,19 @@ export function PublicAudit() {
                         placeholder="you@example.com"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
+                        disabled={isAuditing}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                        Website URL
+                      </label>
+                      <Input
+                        type="text"
+                        placeholder="example.com or https://example.com"
+                        value={website}
+                        onChange={(e) => setWebsite(e.target.value)}
                         disabled={isAuditing}
                       />
                     </div>
@@ -212,32 +243,32 @@ export function PublicAudit() {
             </div>
 
             {/* Benefits Section */}
-            <section className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-              <Card className="text-center">
-                <CardContent className="pt-6">
-                  <Eye className="w-12 h-12 mx-auto mb-4 text-blue-600" />
-                  <h3 className="font-semibold text-slate-900 dark:text-white mb-2">Performance Analysis</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
+            <section className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 lg:gap-8 max-w-5xl mx-auto px-4 sm:px-0">
+              <Card className={`text-center h-full ${isFirstVisit ? 'animate-bounce' : ''}`} style={isFirstVisit ? { animationDelay: '0.2s' } : {}}>
+                <CardContent className="pt-4 sm:pt-6 flex flex-col h-full">
+                  <Eye className="w-10 sm:w-12 h-10 sm:h-12 mx-auto mb-3 sm:mb-4 text-blue-600 flex-shrink-0" />
+                  <h3 className="font-semibold text-slate-900 dark:text-white mb-2 text-sm sm:text-base">Performance Analysis</h3>
+                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 flex-grow">
                     Get detailed insights into your website's loading speed and performance metrics.
                   </p>
                 </CardContent>
               </Card>
 
-              <Card className="text-center">
-                <CardContent className="pt-6">
-                  <TrendingUp className="w-12 h-12 mx-auto mb-4 text-green-600" />
-                  <h3 className="font-semibold text-slate-900 dark:text-white mb-2">SEO Optimization</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
+              <Card className={`text-center h-full ${isFirstVisit ? 'animate-bounce' : ''}`} style={isFirstVisit ? { animationDelay: '0.3s' } : {}}>
+                <CardContent className="pt-4 sm:pt-6 flex flex-col h-full">
+                  <TrendingUp className="w-10 sm:w-12 h-10 sm:h-12 mx-auto mb-3 sm:mb-4 text-green-600 flex-shrink-0" />
+                  <h3 className="font-semibold text-slate-900 dark:text-white mb-2 text-sm sm:text-base">SEO Optimization</h3>
+                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 flex-grow">
                     Discover SEO opportunities and recommendations to improve your search rankings.
                   </p>
                 </CardContent>
               </Card>
 
-              <Card className="text-center">
-                <CardContent className="pt-6">
-                  <Shield className="w-12 h-12 mx-auto mb-4 text-purple-600" />
-                  <h3 className="font-semibold text-slate-900 dark:text-white mb-2">Mobile Readiness</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
+              <Card className={`text-center h-full ${isFirstVisit ? 'animate-bounce' : ''}`} style={isFirstVisit ? { animationDelay: '0.4s' } : {}}>
+                <CardContent className="pt-4 sm:pt-6 flex flex-col h-full">
+                  <Shield className="w-10 sm:w-12 h-10 sm:h-12 mx-auto mb-3 sm:mb-4 text-purple-600 flex-shrink-0" />
+                  <h3 className="font-semibold text-slate-900 dark:text-white mb-2 text-sm sm:text-base">Mobile Readiness</h3>
+                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 flex-grow">
                     Ensure your site is optimized for mobile devices and provides great UX.
                   </p>
                 </CardContent>
@@ -275,27 +306,27 @@ export function PublicAudit() {
 
               {/* Overall Score Card */}
               <Card className="border-2 border-blue-200 dark:border-blue-900 mb-8 bg-gradient-to-br from-blue-50 to-slate-50 dark:from-blue-950 dark:to-slate-900">
-                <CardContent className="pt-8">
-                  <div className="flex flex-col md:flex-row items-center justify-between gap-8">
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">
+                <CardContent className="pt-6 sm:pt-8">
+                  <div className="flex flex-col md:flex-row items-center justify-between gap-6 sm:gap-8">
+                    <div className="text-center flex-shrink-0">
+                      <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-2 sm:mb-3">
                         Overall Score
                       </p>
-                      <div className="flex justify-center mb-2">
+                      <div className="flex justify-center mb-2 px-2">
                         <ProgressCircle 
                           value={auditResults.overallScore} 
                           size={120}
                         />
                       </div>
                     </div>
-                    <div className="flex-1 space-y-4">
-                      <p className="text-lg font-semibold text-slate-900 dark:text-white">
+                    <div className="flex-1 space-y-4 w-full md:w-auto px-2 sm:px-0">
+                      <p className="text-base sm:text-lg font-semibold text-slate-900 dark:text-white">
                         Your website is performing
                         <span className={`ml-2 ${getScoreColor(auditResults.overallScore)} font-bold`}>
                           {auditResults.overallScore >= 80 ? 'Excellent' : auditResults.overallScore >= 60 ? 'Good' : 'Needs Improvement'}
                         </span>
                       </p>
-                      <p className="text-slate-600 dark:text-slate-400">
+                      <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400">
                         {auditResults.overallScore >= 80
                           ? 'Your website is well-optimized! Keep maintaining these high standards.'
                           : auditResults.overallScore >= 60
@@ -308,18 +339,20 @@ export function PublicAudit() {
               </Card>
 
               {/* Detailed Scores */}
-              <div className="grid md:grid-cols-3 gap-6 mb-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
                 <Card>
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4 sm:pt-6">
                     <div className="text-center">
-                      <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
+                      <p className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 mb-2 sm:mb-3">
                         SEO Score
                       </p>
-                      <ProgressCircle 
-                        value={auditResults.seoScore} 
-                        size={100}
-                      />
-                      <p className={`mt-2 text-sm font-semibold ${getScoreColor(auditResults.seoScore)}`}>
+                      <div className="flex justify-center px-2">
+                        <ProgressCircle 
+                          value={auditResults.seoScore} 
+                          size={100}
+                        />
+                      </div>
+                      <p className={`mt-2 text-xs sm:text-sm font-semibold ${getScoreColor(auditResults.seoScore)}`}>
                         {auditResults.seoScore}/100
                       </p>
                     </div>
@@ -327,33 +360,37 @@ export function PublicAudit() {
                 </Card>
 
                 <Card>
-                  <CardContent className="pt-6">
+                  <CardContent className="pt-4 sm:pt-6">
                     <div className="text-center">
-                      <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
-                        Performance Score
+                      <p className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 mb-2 sm:mb-3">
+                        Performance
                       </p>
-                      <ProgressCircle 
-                        value={auditResults.performanceScore} 
-                        size={100}
-                      />
-                      <p className={`mt-2 text-sm font-semibold ${getScoreColor(auditResults.performanceScore)}`}>
+                      <div className="flex justify-center px-2">
+                        <ProgressCircle 
+                          value={auditResults.performanceScore} 
+                          size={100}
+                        />
+                      </div>
+                      <p className={`mt-2 text-xs sm:text-sm font-semibold ${getScoreColor(auditResults.performanceScore)}`}>
                         {auditResults.performanceScore}/100
                       </p>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardContent className="pt-6">
+                <Card className="sm:col-span-2 lg:col-span-1">
+                  <CardContent className="pt-4 sm:pt-6">
                     <div className="text-center">
-                      <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
+                      <p className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 mb-2 sm:mb-3">
                         Mobile Score
                       </p>
-                      <ProgressCircle 
-                        value={auditResults.mobileScore} 
-                        size={100}
-                      />
-                      <p className={`mt-2 text-sm font-semibold ${getScoreColor(auditResults.mobileScore)}`}>
+                      <div className="flex justify-center px-2">
+                        <ProgressCircle 
+                          value={auditResults.mobileScore} 
+                          size={100}
+                        />
+                      </div>
+                      <p className={`mt-2 text-xs sm:text-sm font-semibold ${getScoreColor(auditResults.mobileScore)}`}>
                         {auditResults.mobileScore}/100
                       </p>
                     </div>
@@ -409,7 +446,7 @@ export function PublicAudit() {
               <Card className="bg-gradient-to-r from-blue-600 to-purple-600 border-0">
                 <CardContent className="pt-8 text-center">
                   <h3 className="text-2xl font-bold text-white mb-2">
-                    Turn This Into a Better Website
+                    Create My Better Website
                   </h3>
                   <p className="text-blue-100 mb-6 max-w-2xl mx-auto">
                     Sign up for SalesAPE to implement these recommendations automatically and generate a high-converting website powered by AI.

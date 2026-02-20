@@ -6,7 +6,6 @@ import { Input } from '../components/Input';
 import { Card, CardHeader, CardContent } from '../components/Card';
 import { ProgressCircle } from '../components/ProgressCircle';
 import { Badge } from '../components/Badge';
-import { ThemeToggle } from '../components/ThemeToggle';
 import { PricingModal } from '../components/PricingModal';
 import { UpgradePrompt } from '../components/UpgradePrompt';
 import { useSubscription } from '../contexts/SubscriptionContext';
@@ -154,7 +153,6 @@ export function SEOAudit() {
             <Logo size="sm" className="md:hidden" />
             <Logo size="md" className="hidden md:block" />
             <div className="flex items-center gap-3">
-              <ThemeToggle />
               <Button variant="ghost" onClick={() => navigate('/dashboard')}>
                 <ArrowLeft className="w-4 h-4" />
                 <span className="hidden sm:inline">Back to Dashboard</span>
@@ -346,7 +344,7 @@ export function SEOAudit() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {(auditResults?.recommendations || []).map((rec, index) => (
+                  {(auditResults?.recommendations || []).map((rec: any, index: number) => (
                     <div key={index} className="flex items-start gap-3">
                       <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
                       <p className="text-gray-700 dark:text-gray-300">{rec}</p>

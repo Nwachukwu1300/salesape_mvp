@@ -1,18 +1,22 @@
 import axios from 'axios';
+import { getAccessToken } from './supabase';
 
 export const API_BASE = ((import.meta.env as any).VITE_API_URL || 'http://localhost:3001').replace(/\/+$/g, '');
 
 const client = axios.create({ baseURL: API_BASE });
 
-// Attach JWT from localStorage to Authorization header
+// Attach JWT from memory to Authorization header
 client.interceptors.request.use((config) => {
   try {
-    const token = localStorage.getItem('supabase.auth.token');
+    const token = getAccessToken();
     if (token && config.headers) {
       config.headers['Authorization'] = `Bearer ${token}`;
+      console.log('[API] Token attached:', token.substring(0, 20) + '...');
+    } else {
+      console.log('[API] No token available');
     }
   } catch (e) {
-    // ignore
+    console.error('[API] Error getting token:', e);
   }
   return config;
 });

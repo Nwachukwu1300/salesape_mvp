@@ -212,8 +212,14 @@ export function getTemplateRecommendations(
   // Sort by confidence
   results.sort((a, b) => b.confidence - a.confidence);
 
+  const firstResult = results[0];
+  const recommended: TemplateSelectionResult = firstResult || { 
+    template: allTemplates[0]!, 
+    confidence: 50, 
+    reason: 'Default template' 
+  };
   return {
-    recommended: results[0],
+    recommended,
     alternatives: results.slice(1),
   };
 }

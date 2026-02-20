@@ -4,7 +4,6 @@ import { Logo } from '../components/Logo';
 import { Button } from '../components/Button';
 import { Card, CardHeader, CardContent } from '../components/Card';
 import { Badge } from '../components/Badge';
-import { ThemeToggle } from '../components/ThemeToggle';
 import { useAuth } from '../contexts/AuthContext';
 import {
   ArrowLeft,
@@ -178,7 +177,6 @@ export function ManageBookings() {
                 </p>
               </div>
             </div>
-            <ThemeToggle />
           </div>
         </div>
       </header>

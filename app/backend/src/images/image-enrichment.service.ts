@@ -178,7 +178,7 @@ function getUnsplashCategory(category: string): string {
     }
   }
 
-  return UNSPLASH_COLLECTIONS.default;
+  return UNSPLASH_COLLECTIONS.default || 'business-work';
 }
 
 /**
@@ -230,7 +230,7 @@ function getFallbackImages(category: string): string[] {
     }
   }
 
-  return FALLBACK_IMAGES.default;
+  return FALLBACK_IMAGES.default || [];
 }
 
 /**
@@ -302,8 +302,9 @@ export async function enrichImages(input: ImageEnrichmentInput): Promise<ImageEn
   images = [...new Set(images)];
 
   // Ensure minimum 3 images
-  while (images.length < 3) {
-    const fallback = FALLBACK_IMAGES.default[images.length] || FALLBACK_IMAGES.default[0];
+  const defaultFallbacks = FALLBACK_IMAGES.default || [];
+  while (images.length < 3 && defaultFallbacks.length > 0) {
+    const fallback: string = (defaultFallbacks[images.length] || defaultFallbacks[0]) as string;
     if (!images.includes(fallback)) {
       images.push(fallback);
     } else {
@@ -313,7 +314,7 @@ export async function enrichImages(input: ImageEnrichmentInput): Promise<ImageEn
 
   return {
     assets: {
-      hero: images[0] || FALLBACK_IMAGES.default[0],
+      hero: (images[0] || defaultFallbacks[0] || 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200') as string,
       gallery: images.slice(1),
     },
     source,
@@ -327,7 +328,7 @@ export async function enrichImages(input: ImageEnrichmentInput): Promise<ImageEn
 export function enrichImagesSync(category: string): ImageAssets {
   const images = getFallbackImages(category);
   return {
-    hero: images[0],
+    hero: (images[0] || 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200') as string,
     gallery: images.slice(1),
   };
 }

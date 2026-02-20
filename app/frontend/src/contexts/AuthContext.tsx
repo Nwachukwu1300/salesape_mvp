@@ -1,5 +1,14 @@
 import { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, getAccessToken, setAccessToken } from '../lib/supabase';
+
+// Dynamic API URL: uses the same host as the frontend but on port 3001
+const getApiUrl = () => {
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    return `http://${hostname}:3001`;
+  }
+  return import.meta.env.VITE_API_URL || 'http://localhost:3001';
+};
 
 interface User {
   id: string;
@@ -38,7 +47,7 @@ function parseJwt(token: string | null) {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const resetInactivityTimer = () => {
@@ -46,32 +55,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(inactivityTimerRef.current);
     }
 
-    const token = localStorage.getItem('supabase.auth.token');
+    const token = getAccessToken();
     if (token) {
       inactivityTimerRef.current = setTimeout(() => {
         console.log('Inactivity timeout - auto signing out');
-        localStorage.removeItem('supabase.auth.token');
-        localStorage.removeItem('supabase.refresh.token');
-        setUser(null);
-        alert('You have been signed out due to inactivity.');
+        signOut();
       }, INACTIVITY_TIMEOUT);
     }
   };
 
   useEffect(() => {
     console.log('=== AuthProvider useEffect initializing ===');
-    const token = localStorage.getItem('supabase.auth.token');
-    console.log('Token from localStorage:', token ? `${token.substring(0, 20)}...` : 'NOT FOUND');
-    if (token) {
-      const payload = parseJwt(token);
-      console.log('Parsed JWT payload:', payload);
-      if (payload && payload.sub) {
-        setUser({ id: payload.sub, email: payload.email });
-        console.log('User set from token:', payload.sub);
-      } else {
-        console.log('Invalid token payload');
+    setLoading(true);
+    
+    // Try to load session from memory/storage
+    const loadSession = async () => {
+      try {
+        // Get current session from memory
+        const token = getAccessToken();
+        console.log('Token from memory:', token ? `${token.substring(0, 20)}...` : 'NOT FOUND');
+        
+        if (token) {
+          const payload = parseJwt(token);
+          console.log('Parsed JWT payload:', payload);
+          if (payload && payload.sub) {
+            setUser({ id: payload.sub, email: payload.email });
+            console.log('User set from token:', payload.sub);
+            resetInactivityTimer();
+          } else {
+            console.log('Invalid token payload');
+            setAccessToken(null);
+            setUser(null);
+          }
+        } else {
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('Error loading session:', error);
+        setUser(null);
+      } finally {
+        setLoading(false);
       }
-    }
+    };
+    
+    loadSession();
 
     // Set up activity listeners
     const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
@@ -82,9 +109,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     events.forEach(event => {
       document.addEventListener(event, handleActivity);
     });
-
-    // Initial timer
-    resetInactivityTimer();
 
     return () => {
       events.forEach(event => {
@@ -99,74 +123,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, password: string) => {
     setLoading(true);
     try {
-      const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/g, '');
-      console.log('=== SignIn START ===');
-      console.log('Email:', email);
-      console.log('API_BASE:', API_BASE);
+      console.log('=== Supabase SignIn START ===');
+      const result = await supabase.auth.signIn(email, password);
+      console.log('SignIn result:', { hasError: !!result.error, hasData: !!result.data });
       
-      const endpoint = `${API_BASE}/auth/login`;
-      console.log('Calling endpoint:', endpoint);
+      if (result.error) {
+        console.error('SignIn error:', result.error);
+        throw new Error(result.error.message || 'Sign in failed');
+      }
+
+      // Check that token was saved in memory
+      const token = getAccessToken();
+      console.log('Token in memory after signIn:', !!token);
       
-      const resp = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      
-      console.log('Response status:', resp.status);
-      console.log('Response headers:', Object.fromEntries(resp.headers.entries()));
-      
-      const body = await resp.json();
-      console.log('Response body keys:', Object.keys(body));
-      console.log('Response body has token:', !!body.token);
-      console.log('Response body has user:', !!body.user);
-      console.log('Full response:', { token: body.token ? 'EXISTS' : 'MISSING', user: body.user, error: body.error });
-      
-      if (!resp.ok) {
-        const errMsg = body.error || body.details || 'Sign in failed';
-        console.error('SignIn failed with error:', errMsg);
-        throw new Error(errMsg);
+      if (!token) {
+        throw new Error('No authentication token received. Please try again.');
       }
       
-      if (!body.token) {
-        console.error('Response missing token field');
-        throw new Error('No token in response');
-      }
-      
-      console.log('About to save token to localStorage');
-      localStorage.setItem('supabase.auth.token', body.token);
-      
-      // Verify token was saved
-      const savedToken = localStorage.getItem('supabase.auth.token');
-      console.log('Token save verification:', {
-        saved: !!savedToken,
-        length: savedToken?.length,
-        starts: savedToken?.substring(0, 20)
-      });
-      
-      if (!savedToken) {
-        console.error('CRITICAL: Token was not saved to localStorage!');
-        throw new Error('Failed to save token to localStorage');
-      }
-      
-      // Parse and set user
-      if (body.user) {
+      // Parse token to get user info
+      const payload = parseJwt(token);
+      if (payload && payload.sub) {
         setUser({ 
-          id: body.user.id, 
-          email: body.user.email, 
-          full_name: body.user.name 
+          id: payload.sub, 
+          email: payload.email,
+          full_name: payload.full_name
         });
-        console.log('User set successfully:', { id: body.user.id, email: body.user.email });
+        console.log('User set from token:', payload.email);
+      } else {
+        throw new Error('Invalid token payload');
       }
-      
+
       resetInactivityTimer();
-      console.log('=== SignIn SUCCESS ===');
+      console.log('=== Supabase SignIn SUCCESS ===');
     } catch (err: any) {
-      console.error('=== SignIn FAILED ===');
-      console.error('Error:', err);
-      console.error('Error message:', err?.message);
-      console.error('Error stack:', err?.stack);
-      alert(`Sign in failed: ${err.message}`);
+      console.error('=== SignIn FAILED ===', err.message);
+      setUser(null);
+      setAccessToken(null);
       throw err;
     } finally {
       setLoading(false);
@@ -176,47 +168,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = async (email: string, password: string, fullName?: string) => {
     setLoading(true);
     try {
-      const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/g, '');
-      console.log('=== SignUp START ===');
-      console.log('Email:', email);
-      console.log('API_BASE:', API_BASE);
+      console.log('=== Supabase SignUp START ===');
+      const result = await supabase.auth.signUp(email, password);
       
-      const endpoint = `${API_BASE}/auth/register`;
-      console.log('Calling endpoint:', endpoint);
-      
-      const resp = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, name: fullName }),
-      });
-      
-      console.log('Response status:', resp.status);
-      const body = await resp.json();
-      console.log('Response has token:', !!body.token);
-      
-      if (!resp.ok) {
-        const errMsg = body.error || body.details || 'Sign up failed';
-        console.error('SignUp failed:', errMsg);
-        throw new Error(errMsg);
+      if (result.error) {
+        console.error('SignUp error:', result.error);
+        throw new Error(result.error.message || 'Sign up failed');
       }
       
-      if (body.token) {
-        console.log('Saving token to localStorage');
-        localStorage.setItem('supabase.auth.token', body.token);
-        
-        // Verify
-        const saved = localStorage.getItem('supabase.auth.token');
-        console.log('Token saved:', !!saved);
-        
-        setUser({ id: body.user.id, email: body.user.email, full_name: body.user.name });
-        resetInactivityTimer();
-        console.log('=== SignUp SUCCESS ===');
-      } else {
-        throw new Error('No token in response');
+      // Check that token was saved in memory
+      const token = getAccessToken();
+      console.log('Token saved:', !!token);
+      
+      if (!token) {
+        throw new Error('No authentication token received after signup. Please try again.');
       }
+      
+      if (result.data?.id) {
+        setUser({ 
+          id: result.data.id, 
+          email: result.data.email, 
+          full_name: fullName 
+        });
+        console.log('User set:', result.data.email);
+      }
+      
+      resetInactivityTimer();
+      console.log('=== Supabase SignUp SUCCESS ===');
     } catch (err: any) {
-      console.error('=== SignUp FAILED ===', err);
-      alert(`Sign up failed: ${err.message}`);
+      console.error('=== SignUp FAILED ===', err.message);
+      setUser(null);
+      setAccessToken(null);
       throw err;
     } finally {
       setLoading(false);
@@ -224,33 +206,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    setLoading(true);
     try {
-      const token = localStorage.getItem('supabase.auth.token');
+      console.log('=== SignOut START ===');
       
-      // Call logout on backend if token exists
-      if (token) {
-        const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/g, '');
-        try {
-          await fetch(`${API_BASE}/auth/logout`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-          });
-        } catch (err) {
-          console.error('Error calling logout endpoint:', err);
-          // Continue with local cleanup even if backend fails
-        }
+      // Call backend to clear refresh cookie
+      try {
+        await fetch(`${getApiUrl()}/api/auth/clear-refresh-cookie`, { method: 'POST' });
+      } catch (err) {
+        console.warn('Failed to clear refresh cookie:', err);
       }
       
-      // Clear all auth data from localStorage
-      localStorage.removeItem('supabase.auth.token');
-      localStorage.removeItem('supabase.refresh.token');
-      localStorage.removeItem('user');
-      
-      // Clear state
+      // Clear auth context state
+      setAccessToken(null);
       setUser(null);
       
       // Clear inactivity timer
@@ -259,7 +226,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         inactivityTimerRef.current = null;
       }
       
+      // Clear Supabase session
+      await supabase.auth.signOut();
+      
       console.log('=== SignOut SUCCESS ===');
+    } catch (error) {
+      console.error('SignOut error:', error);
     } finally {
       setLoading(false);
     }
@@ -278,7 +250,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resetPassword = async (email: string) => {
     setLoading(true);
     try {
-      const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/g, '');
+      const API_BASE = getApiUrl().replace(/\/+$/g, '');
       await fetch(`${API_BASE}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -291,7 +263,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const getToken = () => localStorage.getItem('supabase.auth.token');
+  const getToken = (): string | null => {
+    return getAccessToken() || null;
+  };
 
   return (
     <AuthContext.Provider

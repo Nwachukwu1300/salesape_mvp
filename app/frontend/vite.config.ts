@@ -54,7 +54,13 @@
       outDir: 'build',
     },
     server: {
-      port: 3000,
+      host: true,
+      port: 3002,
       open: true,
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
     },
   });

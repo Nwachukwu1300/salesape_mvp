@@ -92,15 +92,17 @@ function generateServiceItems(
     casual: (s) => `Great ${s.toLowerCase()} without the hassle. Simple as that.`,
   };
 
-  const descriptionGenerator = toneDescriptions[brandTone] || toneDescriptions.professional;
+  const descriptionGenerator: (service: string) => string = toneDescriptions[brandTone] || ((s) => `Professional ${s.toLowerCase()} services`);
+
+  const defaultImage = 'https://images.unsplash.com/photo-1552664730-d307ca884978?w=400&h=300&fit=crop';
 
   return services.map((service, index) => ({
     name: service,
     description: descriptionGenerator(service),
     // Assign gallery images to services, cycling through available images
     image: galleryImages && galleryImages.length > 0
-      ? galleryImages[index % galleryImages.length]
-      : undefined,
+      ? galleryImages[index % galleryImages.length]!
+      : defaultImage,
   }));
 }
 
@@ -324,20 +326,25 @@ export async function generateWebsiteConfig(
   ];
 
   // Generate the config
-  const config: WebsiteConfig = {
+  const branddingConfig: any = {
+    colors: brandColors.length > 0 ? brandColors : ['#3B82F6', '#1E40AF'],
+    tone: brandTone,
+    fontFamily: template.layout.typography === 'luxury' ? 'Playfair Display' :
+                template.layout.typography === 'modern' ? 'Inter' : 'Georgia',
+  };
+  
+  if (logoUrl) {
+    branddingConfig.logoUrl = logoUrl;
+  }
+
+  const config: any = {
     meta: {
       title: `${name} | ${category} Services${location ? ` in ${location}` : ''}`,
       description: generateMetaDescription(name, services, location, targetAudience),
       keywords: seoKeywords,
       ogImage: heroImage,
     },
-    branding: {
-      colors: brandColors.length > 0 ? brandColors : ['#3B82F6', '#1E40AF'],
-      tone: brandTone,
-      logoUrl,
-      fontFamily: template.layout.typography === 'luxury' ? 'Playfair Display' :
-                  template.layout.typography === 'modern' ? 'Inter' : 'Georgia',
-    },
+    branding: branddingConfig,
     hero: {
       headline: generateHeadline(name, services, valueProposition),
       subheadline: generateSubheadline(targetAudience, services, location),
@@ -354,51 +361,63 @@ export async function generateWebsiteConfig(
     about: {
       title: `About ${name}`,
       content: generateAboutContent(name, valueProposition, targetAudience, trustSignals, brandTone),
-      image: imageAssets?.gallery?.[0] || stockImages.gallery[0] || scrapedData?.images?.[1],
       highlights: trustSignals.slice(0, 4),
     },
     // Testimonials - only if feature selected
-    testimonials: hasFeature('testimonial') ? {
-      title: 'What Our Clients Say',
-      subtitle: 'Real feedback from real customers',
-      items: generatePlaceholderTestimonials(name, services),
-    } : undefined,
+    ...(hasFeature('testimonial') && {
+      testimonials: {
+        title: 'What Our Clients Say',
+        subtitle: 'Real feedback from real customers',
+        items: generatePlaceholderTestimonials(name, services),
+      },
+    }),
     // Contact form - only if feature selected
-    contact: hasFeature('contact') ? {
-      title: 'Get In Touch',
-      subtitle: 'We\'d love to hear from you',
-      email: scrapedData?.email,
-      phone: scrapedData?.phone,
-      address: location,
-      formFields: ['name', 'email', 'phone', 'message'],
-      showMap: !!location,
-    } : undefined,
+    ...(hasFeature('contact') && {
+      contact: (() => {
+        const contactObj: any = {
+          title: 'Get In Touch',
+          subtitle: 'We\'d love to hear from you',
+          address: location,
+          formFields: ['name', 'email', 'phone', 'message'],
+          showMap: !!location,
+        };
+        if (scrapedData?.email) contactObj.email = scrapedData.email;
+        if (scrapedData?.phone) contactObj.phone = scrapedData.phone;
+        return contactObj;
+      })(),
+    }),
     // Booking - only if feature selected
-    booking: (hasFeature('booking') || contactPreferences.booking) ? {
-      title: 'Book an Appointment',
-      subtitle: 'Choose a time that works for you',
-      provider: 'internal',
-      availableSlots: true,
-    } : undefined,
+    ...(hasFeature('booking') || contactPreferences.booking) && {
+      booking: {
+        title: 'Book an Appointment',
+        subtitle: 'Choose a time that works for you',
+        provider: 'internal',
+        availableSlots: true,
+      },
+    },
     // Gallery - only if feature selected
-    gallery: hasFeature('gallery') ? {
-      title: 'Our Work',
-      subtitle: 'See what we\'ve accomplished',
-      images: galleryImages.map((url, i) => ({
-        url,
-        title: `Project ${i + 1}`,
-      })),
-    } : undefined,
+    ...(hasFeature('gallery') && {
+      gallery: {
+        title: 'Our Work',
+        subtitle: 'See what we\'ve accomplished',
+        images: galleryImages.map((url, i) => ({
+          url,
+          title: `Project ${i + 1}`,
+        })),
+      },
+    }),
     // Pricing table - only if feature selected
-    pricingTable: hasFeature('pricing') ? {
-      title: 'Our Pricing',
-      subtitle: 'Transparent pricing for all services',
-      items: services.slice(0, 4).map(service => ({
-        name: service,
-        price: 'Contact for quote',
-        description: `Professional ${service.toLowerCase()} services`,
-      })),
-    } : undefined,
+    ...(hasFeature('pricing') && {
+      pricingTable: {
+        title: 'Our Pricing',
+        subtitle: 'Transparent pricing for all services',
+        items: services.slice(0, 4).map(service => ({
+          name: service,
+          price: 'Contact for quote',
+          description: `Professional ${service.toLowerCase()} services`,
+        })),
+      },
+    }),
     localSEO: {
       location,
       keywords: generateLocalSEOKeywords(location, services, category),
@@ -421,7 +440,7 @@ export async function generateWebsiteConfig(
     generatedAt: new Date().toISOString(),
   };
 
-  return config;
+  return config as WebsiteConfig;
 }
 
 export default generateWebsiteConfig;

@@ -122,16 +122,18 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
       // Fetch dedicated usage endpoint for SEO/free audits
       let seoAudits = 0;
-      try {
-        const usageRes = await fetch(`${API_BASE}/businesses/${firstBiz.id}/usage`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (usageRes.ok) {
-          const usageBody = await usageRes.json();
-          seoAudits = usageBody?.seoAudits ?? 0;
+      if (firstBiz && firstBiz.id) {
+        try {
+          const usageRes = await fetch(`${API_BASE}/businesses/${firstBiz.id}/usage`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (usageRes.ok) {
+            const usageBody = await usageRes.json();
+            seoAudits = usageBody?.seoAudits ?? 0;
+          }
+        } catch (err) {
+          console.warn('Unable to fetch seo audit usage:', err);
         }
-      } catch (err) {
-        console.warn('Unable to fetch seo audit usage:', err);
       }
 
       setUsage({ websites, leads, seoAudits });

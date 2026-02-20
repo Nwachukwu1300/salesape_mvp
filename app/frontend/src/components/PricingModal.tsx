@@ -9,6 +9,7 @@ interface PricingModalProps {
   isOpen: boolean;
   onClose: () => void;
   highlightPlan?: PlanType;
+  plans?: any;
 }
 
 export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalProps) {
@@ -85,7 +86,7 @@ export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalPro
                     ? 'ring-2 ring-offset-2 dark:ring-offset-gray-800 shadow-xl scale-105'
                     : ''
                 }`}
-                style={isHighlighted ? { ringColor: '#f724de' } : {}}
+                style={isHighlighted ? ({ ['--tw-ring-color']: '#f724de' } as React.CSSProperties) : undefined}
               >
                 {isHighlighted && (
                   <div

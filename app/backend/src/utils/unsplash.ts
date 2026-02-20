@@ -392,10 +392,16 @@ function getFallbackImages(category: string, services: string[] = []): { hero: s
   const sortedCategories = Object.entries(scores).sort((a, b) => b[1] - a[1]);
 
   if (sortedCategories.length > 0) {
-    const [bestCategory, bestScore] = sortedCategories[0];
+    const bestMatch = sortedCategories[0];
+    if (!bestMatch) {
+      // Fallback: return default images
+      return FALLBACK_IMAGES['default']!;
+    }
+    const [bestCategory, bestScore] = bestMatch;
     console.log(`📸 Best match: "${bestCategory}" with score ${bestScore}`);
-    if (FALLBACK_IMAGES[bestCategory]) {
-      return FALLBACK_IMAGES[bestCategory];
+    const categoryImages = FALLBACK_IMAGES[bestCategory as keyof typeof FALLBACK_IMAGES];
+    if (categoryImages) {
+      return categoryImages;
     }
   }
 
@@ -408,7 +414,7 @@ function getFallbackImages(category: string, services: string[] = []): { hero: s
   }
 
   console.log('📸 No match found, using default images');
-  return FALLBACK_IMAGES.default;
+  return FALLBACK_IMAGES['default']!;
 }
 
 /**
@@ -430,7 +436,7 @@ function getSearchTerms(category: string): string[] {
   }
 
   // Return default terms
-  return CATEGORY_SEARCH_TERMS.default;
+  return CATEGORY_SEARCH_TERMS['default']!;
 }
 
 /**
@@ -505,7 +511,8 @@ export async function getStockImagesForCategory(
 
   try {
     // Fetch hero image using primary search term
-    const heroImages = await fetchUnsplashImages(searchTerms[0], 1, 'landscape');
+    const primaryTerm = searchTerms[0] ?? category;
+    const heroImages = await fetchUnsplashImages(primaryTerm, 1, 'landscape');
     const hero = heroImages[0] || null;
 
     // Fetch gallery images using multiple search terms

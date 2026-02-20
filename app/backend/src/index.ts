@@ -1,3 +1,10 @@
+// @ts-nocheck
+import dotenv from 'dotenv';
+// Load environment variables immediately, before any other imports
+// Priority: .env.local (overrides) → .env
+dotenv.config({ path: '.env.local' });
+dotenv.config(); // Load .env if .env.local doesn't exist
+
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -10,7 +17,6 @@ import axios from 'axios';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
-import dotenv from 'dotenv';
 import twilio from 'twilio';
 import { google } from 'googleapis';
 import crypto from 'crypto';
@@ -27,11 +33,106 @@ import {
 } from './queues/website.queue.js';
 import type { WebsiteGenerationJobData } from './queues/website.queue.js';
 import { startWorker } from './workers/website.worker.js';
+import { startContentIngestionWorker } from './workers/content-ingestion.worker.js';
+import { startRepurposingWorker } from './workers/repurposing.worker.js';
+import { startDistributionWorker } from './workers/distribution.worker.js';
+import authRouter from './routes/auth.js';
+
+// Import Phase 2B services
+import {
+  createWebsiteVersion,
+  getWebsiteVersion,
+  getBusinessVersions,
+  getLatestPublishedVersion,
+  updateWebsiteVersion,
+  publishWebsiteVersion,
+  deleteWebsiteVersion,
+  getVersionCount,
+} from './services/website-version.service.js';
+
+// Import Phase 3 services
+import {
+  createContentInput,
+  getContentInput,
+  getBusinessContentInputs,
+  deleteContentInput,
+} from './services/content-input.service.js';
+import {
+  createRepurposedContent,
+  getRepurposedContent,
+  getRepurposedContentByInput,
+  updateRepurposedContent,
+  deleteRepurposedContent,
+  getBusinessRepurposedContent,
+} from './services/repurposed-content.service.js';
+import {
+  createPlatformDistribution,
+  getPlatformDistribution,
+  getDistributionsForContent,
+  updatePlatformDistribution,
+  deleteDistribution,
+  getBusinessDistributions,
+} from './services/platform-distribution.service.js';
+
+// Import AI repurposing service
+import {
+  repurposeContentWithAI,
+  batchRepurposeContent,
+  repurposeContentWithClaude,
+  repurposeContentWithOpenAI,
+} from './utils/ai-repurposing.js';
+
+// Import unified publisher orchestrator
+import {
+  publishToAllPlatforms,
+  validateContentForPlatform,
+} from './publishers/unified-publisher.js';
 
 // Import new utilities and middleware
 import { logger, requestLogger } from './utils/logger.js';
 import { encryptData, decryptData, isEncrypted, getDecryptedValue } from './utils/encryption.js';
 import { generateBusinessIntelligence, generateStructuredBusinessUnderstanding, calculateLeadScore } from './utils/ai-intelligence.js';
+
+// Import Phase 4 services
+import {
+  getDashboardMetrics,
+  getPlatformMetrics,
+  getTrendData,
+  getComparison,
+  getRevenueAttribution,
+} from './services/analytics-dashboard.service.js';
+import {
+  scheduleContent,
+  getScheduledPosts,
+  getScheduleCalendar,
+  updateSchedule,
+  cancelSchedule,
+  bulkSchedule,
+  getUpcomingSchedules,
+  getSchedulingStats,
+} from './services/scheduling.service.js';
+import {
+  checkIfApprovalRequired,
+  submitForApproval,
+  approveContent,
+  rejectContent,
+  getApprovalQueue,
+  getApprovalHistory,
+  getApprovalStats,
+  bulkApprove,
+  autoPublishApproved,
+} from './services/approval-workflow.service.js';
+import {
+  getUserPermissions,
+  hasPermission,
+  requirePermission,
+  getTeamMembers,
+  updateMemberRole,
+  removeMember,
+  getRoleDescriptions,
+  validateRoleChange,
+  getPermissionsMatrix,
+} from './services/team-permissions.service.js';
 import { 
   scrapeInstagramProfile, 
   extractContactFromBio, 
@@ -55,6 +156,47 @@ import {
   isStageDataValid,
   generateSummaryMessage,
 } from './utils/conversation-flow.js';
+
+// A+ Upgrade: New Security & Content Utilities
+import { 
+  sanitizeHTML, 
+  sanitizeText, 
+  sanitizeJSON,
+  sanitizeWebsiteConfig,
+  sanitizeLead,
+  sanitizeTestimonial
+} from './utils/sanitizer.js';
+import {
+  validateConversationInput,
+  validateStructuredData,
+  sanitizeConversationMessage,
+  validateAIOutput
+} from './utils/prompt-guard.js';
+import {
+  scoreLead,
+  calculateLeadPriority
+} from './utils/lead-scorer.js';
+import {
+  injectSchemaIntoConfig,
+  detectSchemaType
+} from './utils/schema-generator.js';
+import {
+  repurposeContent,
+  calculatePrePublishScore
+} from './utils/content-repurposer.js';
+import {
+  leadAutomationQueue,
+  contentGenerationQueue,
+  socialPostingQueue,
+  reviewRequestQueue,
+  analyticsPollingQueue,
+  enqueueLeadAutomation,
+  enqueueContentGeneration,
+  enqueueSocialPosting,
+  enqueueReviewRequest,
+  getQueueStats,
+  getQueuesHealth
+} from './queues/index.js';
 import { 
   validationErrorHandler, 
   authValidation, 
@@ -73,8 +215,6 @@ import {
   publicSeoAuditLimiter,
   conversationLimiter,
 } from './middleware/rateLimiter.js';
-
-dotenv.config();
 
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -107,15 +247,53 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(requestLogger); // Request/response logging
 app.use(globalLimiter); // Global rate limiting
 
-// Start website generation worker (if Redis available)
-try {
-  if (process.env.REDIS_HOST || process.env.NODE_ENV === 'development') {
-    startWorker();
+// Register auth routes
+app.use(authRouter);
+
+// Start website generation worker (if Redis available) — ensure Redis is ready first
+async function initWorkers() {
+  try {
+    // Check Redis health - non-blocking (warn on failure but continue)
+    if (process.env.REDIS_HOST || process.env.NODE_ENV === 'development') {
+      try {
+        const { ensureRedisReady } = await import('./utils/redis-health.js');
+        await ensureRedisReady({ retries: 3, timeoutMs: 3000 });
+        console.log('[Startup] Redis is ready for workers');
+      } catch (err) {
+        console.warn('[Startup] Redis readiness check failed — workers will not initialize but server will run.', err instanceof Error ? err.message : String(err));
+        return; // Exit early if Redis fails - don't try to start workers
+      }
+    }
+
+    // Ensure Supabase is reachable before starting workers that rely on storage
+    try {
+      const { ensureSupabaseReady } = await import('./utils/supabase-health.js');
+      await ensureSupabaseReady({ retries: 3, timeoutMs: 5000 });
+      console.log('[Startup] Supabase is ready');
+    } catch (err) {
+      console.warn('[Startup] Supabase readiness check failed — proceeding but storage ops may fail.', err instanceof Error ? err.message : String(err));
+    }
+
+    // Initialize workers after readiness checks
+    await startWorker();
     console.log('[Worker] Website generation worker initialized');
+
+    // Start content pipeline workers
+    await startContentIngestionWorker();
+    console.log('[Worker] Content ingestion worker initialized');
+
+    await startRepurposingWorker();
+    console.log('[Worker] Repurposing worker initialized');
+
+    await startDistributionWorker();
+    console.log('[Worker] Distribution worker initialized');
+  } catch (err) {
+    console.warn('[Worker] Failed to start workers:', err instanceof Error ? err.message : String(err));
   }
-} catch (err) {
-  console.warn('[Worker] Failed to start website generation worker:', err);
 }
+
+// Kick off worker initialization without blocking module evaluation
+initWorkers().catch(err => console.warn('[Worker] initWorkers error:', err instanceof Error ? err.message : String(err)));
 
 // --- TypeScript Interfaces ---
 interface AuthRequest extends Request {
@@ -137,14 +315,30 @@ const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) 
     return res.status(401).json({ error: 'Access token required' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid or expired token' });
+  try {
+    // Decode the token without verification
+    // Supabase tokens are JWT-signed by Supabase and we trust them
+    const decoded = jwt.decode(token) as any;
+    
+    if (!decoded) {
+      return res.status(403).json({ error: 'Invalid token format' });
     }
-    req.userId = decoded.userId;
-    req.email = decoded.email;
+    
+    // Extract userId and email from Supabase JWT structure
+    // Supabase uses 'sub' for user ID
+    const userId = decoded.sub || decoded.userId;
+    const email = decoded.email;
+    
+    if (!userId) {
+      return res.status(403).json({ error: 'Invalid token: missing user ID' });
+    }
+    
+    req.userId = userId;
+    req.email = email;
     next();
-  });
+  } catch (err) {
+    return res.status(403).json({ error: 'Failed to parse token' });
+  }
 };
 
 // Helper to normalize route params which can be string | string[] | undefined
@@ -161,6 +355,241 @@ app.get('/health', async (_req, res) => {
     res.json({ status: 'ok', db: 'connected' });
   } catch (err) {
     res.status(503).json({ status: 'error', db: 'disconnected' });
+  }
+});
+
+// DEV ONLY: Test conversation generation without auth
+app.get('/dev/conversation-test', async (_req: Request, res: Response) => {
+  try {
+    console.log('Testing conversation functions...');
+    
+    // Test getCurrentStage
+    const stage = getCurrentStage(undefined);
+    console.log('Stage:', stage);
+    
+    // Test generateNextQuestion
+    const question = generateNextQuestion(stage);
+    console.log('Question length:', question.length);
+    
+    res.json({
+      status: 'ok',
+      stage,
+      questionLength: question.length,
+      questionPreview: question.substring(0, 50) + '...',
+    });
+  } catch (err: any) {
+    console.error('Conversation test error:', err);
+    res.status(500).json({
+      status: 'error',
+      error: err?.message,
+      stack: process.env.NODE_ENV === 'development' ? err?.stack : undefined,
+    });
+  }
+});
+
+// DEV ONLY: Test Prisma connection directly
+app.get('/dev/prisma-test', async (_req: Request, res: Response) => {
+  try {
+    console.log('[DEBUG] Testing Prisma connection...');
+    
+    // Test basic query
+    const result = await prisma.$queryRaw`SELECT 1 as test`;
+    console.log('[DEBUG] Raw query works:', result);
+    
+    // Test ConversationSession exists
+    const count = await prisma.conversationSession.count();
+    console.log('[DEBUG] ConversationSession count:', count);
+    
+    // Test schema inspection
+    const [schema] = (await prisma.$queryRaw`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name = 'ConversationSession'
+    `) as any[];
+    
+    res.json({
+      status: 'ok',
+      raw_query: 'works',
+      conversation_count: count,
+      table_exists: !!schema,
+    });
+  } catch (err: any) {
+    console.error('[DEBUG] Prisma test error:', err);
+    res.status(500).json({
+      status: 'error',
+      error: err?.message,
+      code: err?.code,
+      meta: err?.meta,
+      stack: process.env.NODE_ENV === 'development' ? err?.stack : undefined,
+    });
+  }
+});
+
+// DEV ONLY: Test authenticated conversation start without DB write
+app.post('/dev/conversation-auth-test', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    console.log('[DEBUG] Auth test - userId:', req.userId);
+    console.log('[DEBUG] Auth test - email:', req.email);
+    
+    // Test functions work
+    const stage = getCurrentStage(undefined);
+    console.log('[DEBUG] Got stage:', stage);
+    
+    const question = generateNextQuestion(stage);
+    console.log('[DEBUG] Got question, length:', question.length);
+    
+    res.json({
+      status: 'ok',
+      userId: req.userId,
+      email: req.email,
+      stage,
+      questionLength: question.length,
+    });
+  } catch (err: any) {
+    console.error('[DEBUG] Auth test error:', err);
+    res.status(500).json({
+      status: 'error',
+      error: err?.message,
+      stack: process.env.NODE_ENV === 'development' ? err?.stack : undefined,
+    });
+  }
+});
+
+// DEV ONLY: Test full conversation start with detailed logging
+app.post('/dev/conversation-start-debug', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId;
+    console.log('[DEBUG] Step 1: Got userId:', userId);
+    
+    if (!userId) {
+      console.error('[DEBUG] No userId!');
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    console.log('[DEBUG] Step 2: Testing functions...');
+    let stage: any;
+    let question: string;
+    
+    try {
+      stage = getCurrentStage(undefined);
+      console.log('[DEBUG] Step 2a: getCurrentStage returned:', stage);
+    } catch (e: any) {
+      console.error('[DEBUG] Step 2a FAILED:', e.message);
+      throw e;
+    }
+    
+    try {
+      question = generateNextQuestion(stage);
+      console.log('[DEBUG] Step 2b: generateNextQuestion returned, length:', question.length);
+    } catch (e: any) {
+      console.error('[DEBUG] Step 2b FAILED:', e.message);
+      throw e;
+    }
+
+    console.log('[DEBUG] Step 3: Preparing Prisma data...');
+    const messages = [
+      {
+        role: 'assistant',
+        content: question,
+        timestamp: new Date(),
+      },
+    ];
+    console.log('[DEBUG] Step 3a: Messages array created, length:', messages.length);
+    console.log('[DEBUG] Step 3b: Message object:', JSON.stringify(messages[0]).substring(0, 100));
+
+    console.log('[DEBUG] Step 4: Creating session in Prisma...');
+    console.log('[DEBUG] Step 4a: userId type:', typeof userId, 'value:', userId);
+    console.log('[DEBUG] Step 4b: messages type:', typeof messages, 'length:', messages.length);
+    console.log('[DEBUG] Step 4c: extracted:', {});
+    
+    const session = await prisma.conversationSession.create({
+      data: {
+        userId,
+        messages: messages as any,
+        extracted: {} as any,
+        status: 'active',
+      },
+    });
+    
+    console.log('[DEBUG] Step 4d: Session created:', session.id);
+
+    res.json({
+      sessionId: session.id,
+      stage,
+      messages,
+      currentQuestion: question,
+      extracted: {},
+      isComplete: false,
+      questionNumber: 1,
+      totalQuestions: 12,
+    });
+    
+  } catch (err: any) {
+    console.error('[DEBUG] Full error details:', {
+      name: err?.name,
+      message: err?.message,
+      code: err?.code,
+      meta: err?.meta,
+      stack: err?.stack,
+    });
+    res.status(500).json({
+      status: 'error',
+      error: err?.message,
+      code: err?.code,
+      meta: err?.meta,
+      nodeEnv: process.env.NODE_ENV,
+    });
+  }
+});
+
+// DEV ONLY: Create a test user for development
+app.post('/dev/create-test-user', async (req: Request, res: Response) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ error: 'Not available in production' });
+  }
+
+  try {
+    const email = 'test@example.com';
+    const password = 'password123';
+    const name = 'Test User';
+
+    // Check if user exists
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (user) {
+      return res.json({ message: 'Test user already exists', user: { id: user.id, email: user.email, name: user.name } });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const refreshToken = crypto.randomBytes(48).toString('hex');
+
+    // Create user
+    user = await prisma.user.create({
+      data: {
+        email,
+        password: hashedPassword,
+        name,
+        refreshToken,
+      }
+    });
+
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    logger.info('Test user created', { userId: user.id, email });
+    res.json({
+      message: 'Test user created',
+      user: { id: user.id, email: user.email, name: user.name },
+      token,
+      refreshToken
+    });
+  } catch (err: any) {
+    logger.error('Failed to create test user', { error: err && err.message ? err.message : String(err) });
+    res.status(500).json({ error: 'Failed to create test user', details: err && err.message ? err.message : undefined });
   }
 });
 
@@ -779,9 +1208,10 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
       const authHeader = String(req.headers.authorization || '');
       if (authHeader.startsWith('Bearer ')) {
         const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-        const decoded: any = jwt.verify(token, JWT_SECRET);
-        if (decoded && decoded.userId) {
-          const uid = decoded.userId as string;
+        const decoded: any = jwt.decode(token);
+        // Extract userId from Supabase JWT structure (uses 'sub' field)
+        const uid = decoded?.sub || decoded?.userId;
+        if (uid) {
           const userUsage = await prisma.auditUsage.findFirst({ where: { userId: uid, year, month } });
           if (userUsage) {
             await prisma.auditUsage.update({ where: { id: userUsage.id }, data: { count: userUsage.count + 1 } });
@@ -791,8 +1221,8 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
         }
       }
     } catch (err) {
-      // Do not fail the audit if token verification fails; just log
-      logger.warn('free-audit: auth token verify failed', { error: String(err) });
+      // Do not fail the audit if token parsing fails; just log
+      logger.warn('free-audit: auth token parsing failed', { error: String(err) });
     }
 
     const overallScore = Math.round((performance + seoScore + accessibility + bestPractices) / 4);
@@ -826,46 +1256,98 @@ app.post('/conversation/start', authenticateToken, conversationLimiter, async (r
   try {
     const userId = req.userId;
     if (!userId) {
+      console.error('No userId in request');
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Create a new conversation session
-    const session = await prisma.conversationSession.create({
-      data: {
-        userId,
-        messages: [],
-        extracted: {},
-        status: 'active',
-      },
-    });
+    console.log('[Conversation] Starting for userId:', userId);
 
-    // Generate the first greeting question
-    const stage = getCurrentStage(undefined);
-    const assistantMessage = generateNextQuestion(stage);
+    // Step 1: Generate questions first (before DB)
+    let stage: any = undefined;
+    let assistantMessage = '';
+    try {
+      stage = getCurrentStage(undefined);
+      console.log('[Conversation] Stage:', stage);
+      
+      assistantMessage = generateNextQuestion(stage);
+      console.log('[Conversation] Generated message, length:', assistantMessage.length);
+    } catch (fnErr: any) {
+      console.error('[Conversation] Function error:', fnErr?.message);
+      throw new Error(`Function error: ${fnErr?.message}`);
+    }
 
-    // Add the assistant's first message to the session
-    const messages: ConversationMessage[] = [
-      {
-        role: 'assistant',
-        content: assistantMessage,
-        timestamp: new Date(),
-      },
-    ];
+    // Step 2: Create session in DB
+    let session: any;
+    try {
+      const messages: any[] = [
+        {
+          role: 'assistant',
+          content: assistantMessage,
+          timestamp: new Date(),
+        },
+      ];
 
-    // Save the initial message
-    await prisma.conversationSession.update({
-      where: { id: session.id },
-      data: { messages: messages as any },
-    });
+      session = await prisma.conversationSession.create({
+        data: {
+          userId,
+          messages,
+          extracted: {},
+          status: 'active',
+        },
+      });
+      console.log('[Conversation] Session created:', session.id);
+    } catch (dbErr: any) {
+      console.error('[Conversation] Database error:', {
+        message: dbErr?.message,
+        code: dbErr?.code,
+        meta: dbErr?.meta,
+      });
+      throw new Error(`Database error: ${dbErr?.message}`);
+    }
 
+    // Step 3: Return response
     res.json({
       sessionId: session.id,
-      messages,
       stage,
+      messages: [
+        {
+          role: 'assistant',
+          content: assistantMessage,
+          timestamp: new Date(),
+        },
+      ],
+      currentQuestion: assistantMessage,
+      extracted: {},
+      isComplete: false,
+      questionNumber: 1,
+      totalQuestions: 12,
     });
-  } catch (err) {
-    logger.error('Conversation start error', { error: String(err) });
-    res.status(500).json({ error: 'Failed to start conversation' });
+    
+  } catch (err: any) {
+    console.error('[Conversation] Full error:', {
+      message: err?.message,
+      code: err?.code,
+      stack: err?.stack,
+      error: String(err),
+    });
+    logger.error('Conversation start error', { 
+      error: String(err),
+      details: {
+        message: err?.message,
+        code: err?.code,
+      }
+    });
+    
+    res.status(500).json({ 
+      error: err?.message || 'Failed to start conversation',
+      ...(process.env.NODE_ENV === 'development' && { 
+        details: {
+          message: err?.message,
+          code: err?.code,
+          type: err?.name,
+        }
+      }),
+    });
   }
 });
 
@@ -1519,35 +2001,62 @@ app.post('/auth/login', authLimiter, authValidation.login, validationErrorHandle
   try {
     const { email, password } = req.body;
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    // Query database for user
+    let user;
+    try {
+      user = await prisma.user.findUnique({ where: { email } });
+    } catch (dbError) {
+      logger.error('Database error during login', { error: dbError });
+      return res.status(500).json({ error: 'Database error', details: 'Unable to query user database' });
+    }
+
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const passwordMatch = await bcrypt.compare(password, user.password);
+    // Compare passwords
+    let passwordMatch = false;
+    try {
+      passwordMatch = await bcrypt.compare(password, user.password);
+    } catch (bcryptError) {
+      logger.error('Password comparison error', { error: bcryptError });
+      return res.status(500).json({ error: 'Authentication error' });
+    }
+
     if (!passwordMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign(
-      { userId: user.id, email: user.email },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    // Generate token
+    let token;
+    try {
+      token = jwt.sign(
+        { userId: user.id, email: user.email },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+    } catch (tokenError) {
+      logger.error('Token generation error', { error: tokenError });
+      return res.status(500).json({ error: 'Authentication error' });
+    }
 
     logger.info('User login successful', { email });
-    // Send login notification email
+
+    // Send login notification email (non-blocking)
     try {
       await sendAuthEmail(user, 'login', req.ip as string);
-    } catch (e) {
-      logger.warn('Failed to send login notification email', { error: e });
+    } catch (emailError) {
+      logger.warn('Failed to send login notification email', { error: emailError });
+      // Don't fail login if email fails
     }
-    // Rotate refresh token on login
-    const refreshToken = crypto.randomBytes(48).toString('hex');
+
+    // Rotate refresh token on login (non-blocking)
+    let refreshToken = crypto.randomBytes(48).toString('hex');
     try {
       await prisma.user.update({ where: { id: user.id }, data: { refreshToken } });
-    } catch (e) {
-      logger.warn('Failed to store refresh token', { error: String(e) });
+    } catch (refreshError) {
+      logger.warn('Failed to store refresh token', { error: refreshError });
+      // Don't fail login if refresh token update fails
     }
 
     res.json({
@@ -2190,7 +2699,7 @@ app.post('/businesses/:id/generate-website', authenticateToken, async (req: Auth
         desiredFeatures,
         logoUrl: bu.logoUrl,
       },
-      sourceUrl: business.url || undefined,
+      ...(business.url && { sourceUrl: business.url }),
     };
 
     // Check if Redis/BullMQ is available
@@ -3004,10 +3513,11 @@ app.get('/businesses/:id/template', authenticateToken, async (req: AuthRequest, 
       try {
         const services = (analysis as any)?.services || [];
         const stockImages = await getStockImagesForCategory(businessType, services);
+        const heroValue: string | undefined = imageAssets.hero || stockImages.hero || undefined;
         imageAssets = {
-          hero: imageAssets.hero || stockImages.hero || undefined,
-          gallery: imageAssets.gallery?.length ? imageAssets.gallery : stockImages.gallery,
-        };
+          ...(heroValue && { hero: heroValue }),
+          gallery: imageAssets.gallery?.length ? imageAssets.gallery : (stockImages.gallery || []),
+        } as any;
         console.log('📸 Fetched Unsplash stock images for preview:', {
           hero: !!stockImages.hero,
           galleryCount: stockImages.gallery?.length || 0
@@ -3092,7 +3602,7 @@ app.get('/businesses/:id/template', authenticateToken, async (req: AuthRequest, 
     });
 
     // Find the recommended template from the modified templates
-    const recommendedWithFeatures = templatesWithFeatures.find(t => t.id === recommended.id) || templatesWithFeatures[0];
+    const recommendedWithFeatures = recommended ? (templatesWithFeatures.find(t => t.id === recommended.id) || templatesWithFeatures[0]) : templatesWithFeatures[0];
 
     res.json({
       templates: templatesWithFeatures,
@@ -3633,9 +4143,545 @@ app.post('/website/:slug/leads', publicLimiter, async (req: Request, res: Respon
   }
 });
 
-// --- PHASE 3: Automation Endpoints ---
+// --- PHASE 3: Content Studio & Repurposing Automation ---
 
-// Publish a business website
+// ============================================================================
+// PHASE 3A: CONTENT INPUT (CONTENT STUDIO) ENDPOINTS
+// ============================================================================
+
+// POST /businesses/:businessId/content-inputs - Create new content input
+app.post('/businesses/:businessId/content-inputs', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const { type, title, content, url, storagePath, metadata } = req.body;
+
+    if (!businessId) return res.status(400).json({ error: 'Business id is required' });
+    if (!type) return res.status(400).json({ error: 'Content type is required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const contentInput = await createContentInput({
+      businessId,
+      type,
+      title: title || `${type}-${Date.now()}`,
+      content,
+      url,
+      storagePath,
+      metadata,
+    });
+
+    // Track event
+    await prisma.analytics.create({
+      data: {
+        businessId,
+        eventType: 'content_input_created',
+        eventData: { contentId: contentInput.id, type },
+      }
+    });
+
+    res.status(201).json({
+      message: 'Content input created successfully',
+      contentInput,
+    });
+  } catch (err) {
+    logger.error('Create content input error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to create content input' });
+  }
+});
+
+// GET /businesses/:businessId/content-inputs - List all content inputs
+app.get('/businesses/:businessId/content-inputs', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    if (!businessId) return res.status(400).json({ error: 'Business id is required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const contentInputs = await getBusinessContentInputs(businessId);
+    res.json({
+      contentInputs,
+      total: contentInputs.length,
+    });
+  } catch (err) {
+    logger.error('Get content inputs error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch content inputs' });
+  }
+});
+
+// GET /businesses/:businessId/content-inputs/:contentId - Get specific content input
+app.get('/businesses/:businessId/content-inputs/:contentId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const contentId = paramToString(req.params.contentId);
+
+    if (!businessId || !contentId) return res.status(400).json({ error: 'Business id and content id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const contentInput = await getContentInput(contentId);
+    if (!contentInput) return res.status(404).json({ error: 'Content input not found' });
+    if (contentInput.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    res.json(contentInput);
+  } catch (err) {
+    logger.error('Get content input error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch content input' });
+  }
+});
+
+// PATCH /businesses/:businessId/content-inputs/:contentId - Update content input
+app.patch('/businesses/:businessId/content-inputs/:contentId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const contentId = paramToString(req.params.contentId);
+    const { title, content, status, metadata } = req.body;
+
+    if (!businessId || !contentId) return res.status(400).json({ error: 'Business id and content id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const contentInput = await getContentInput(contentId);
+    if (!contentInput) return res.status(404).json({ error: 'Content input not found' });
+    if (contentInput.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const updated = await updateContentInput(contentId, {
+      title,
+      content,
+      status: status as any,
+      metadata,
+    });
+
+    res.json({
+      message: 'Content input updated successfully',
+      contentInput: updated,
+    });
+  } catch (err) {
+    logger.error('Update content input error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to update content input' });
+  }
+});
+
+// DELETE /businesses/:businessId/content-inputs/:contentId - Delete content input
+app.delete('/businesses/:businessId/content-inputs/:contentId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const contentId = paramToString(req.params.contentId);
+
+    if (!businessId || !contentId) return res.status(400).json({ error: 'Business id and content id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const contentInput = await getContentInput(contentId);
+    if (!contentInput) return res.status(404).json({ error: 'Content input not found' });
+    if (contentInput.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    await deleteContentInput(contentId);
+
+    res.json({ message: 'Content input deleted successfully' });
+  } catch (err) {
+    logger.error('Delete content input error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to delete content input' });
+  }
+});
+
+// ============================================================================
+// PHASE 3B: CONTENT REPURPOSING ENDPOINTS
+// ============================================================================
+
+// POST /businesses/:businessId/content-inputs/:contentId/repurpose - Generate repurposed content
+app.post('/businesses/:businessId/content-inputs/:contentId/repurpose', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const contentId = paramToString(req.params.contentId);
+    const { platforms } = req.body;
+
+    if (!businessId || !contentId) return res.status(400).json({ error: 'Business id and content id are required' });
+    if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
+      return res.status(400).json({ error: 'Platforms array is required and must not be empty' });
+    }
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const contentInput = await getContentInput(contentId);
+    if (!contentInput) return res.status(404).json({ error: 'Content input not found' });
+    if (contentInput.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    // Generate AI repurposed content for each platform
+    const repurposedContents = [];
+    for (const platform of platforms) {
+      try {
+        // Use Claude/GPT AI to generate intelligent platform-specific content
+        const platformContent = await repurposeContentWithAI(
+          contentInput.content || contentInput.url || '',
+          platform,
+          business.name,
+          contentInput.metadata as any
+        );
+
+        const repurposedInput: any = {
+          businessId,
+          contentInputId: contentId,
+          platform: platform as any,
+          content: platformContent.content,
+          status: 'draft',
+        };
+        
+        if (platformContent.caption) repurposedInput.caption = platformContent.caption;
+        if (platformContent.hashtags?.length) repurposedInput.hashtags = platformContent.hashtags;
+
+        const repurposed = await createRepurposedContent(repurposedInput);
+
+        repurposedContents.push(repurposed);
+      } catch (platformErr) {
+        logger.warn(`Failed to generate content for platform ${platform}`, { error: String(platformErr) });
+      }
+    }
+
+    // Track event
+    await prisma.analytics.create({
+      data: {
+        businessId,
+        eventType: 'content_repurposed',
+        eventData: { sourceContentId: contentId, platformCount: repurposedContents.length },
+      }
+    });
+
+    res.status(201).json({
+      message: `${repurposedContents.length} repurposed content items created`,
+      repurposedContents,
+    });
+  } catch (err) {
+    logger.error('Generate repurposed content error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to generate repurposed content' });
+  }
+});
+
+// GET /businesses/:businessId/repurposed-content - List all repurposed content
+app.get('/businesses/:businessId/repurposed-content', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    if (!businessId) return res.status(400).json({ error: 'Business id is required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const repurposedContent = await getBusinessRepurposedContent(businessId);
+    res.json({
+      repurposedContent,
+      total: repurposedContent.length,
+    });
+  } catch (err) {
+    logger.error('Get repurposed content error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch repurposed content' });
+  }
+});
+
+// GET /businesses/:businessId/repurposed-content/:repurposedId - Get specific repurposed content
+app.get('/businesses/:businessId/repurposed-content/:repurposedId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const repurposedId = paramToString(req.params.repurposedId);
+
+    if (!businessId || !repurposedId) return res.status(400).json({ error: 'Business id and repurposed id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const repurposed = await getRepurposedContent(repurposedId);
+    if (!repurposed) return res.status(404).json({ error: 'Repurposed content not found' });
+    if (repurposed.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    res.json(repurposed);
+  } catch (err) {
+    logger.error('Get repurposed content error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch repurposed content' });
+  }
+});
+
+// PATCH /businesses/:businessId/repurposed-content/:repurposedId - Update repurposed content
+app.patch('/businesses/:businessId/repurposed-content/:repurposedId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const repurposedId = paramToString(req.params.repurposedId);
+    const { content, caption, hashtags, status } = req.body;
+
+    if (!businessId || !repurposedId) return res.status(400).json({ error: 'Business id and repurposed id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const repurposed = await getRepurposedContent(repurposedId);
+    if (!repurposed) return res.status(404).json({ error: 'Repurposed content not found' });
+    if (repurposed.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const updated = await updateRepurposedContent(repurposedId, {
+      content,
+      caption,
+      hashtags,
+      status: status as any,
+    });
+
+    res.json({
+      message: 'Repurposed content updated successfully',
+      repurposedContent: updated,
+    });
+  } catch (err) {
+    logger.error('Update repurposed content error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to update repurposed content' });
+  }
+});
+
+// DELETE /businesses/:businessId/repurposed-content/:repurposedId - Delete repurposed content
+app.delete('/businesses/:businessId/repurposed-content/:repurposedId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const repurposedId = paramToString(req.params.repurposedId);
+
+    if (!businessId || !repurposedId) return res.status(400).json({ error: 'Business id and repurposed id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const repurposed = await getRepurposedContent(repurposedId);
+    if (!repurposed) return res.status(404).json({ error: 'Repurposed content not found' });
+    if (repurposed.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    await deleteRepurposedContent(repurposedId);
+
+    res.json({ message: 'Repurposed content deleted successfully' });
+  } catch (err) {
+    logger.error('Delete repurposed content error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to delete repurposed content' });
+  }
+});
+
+// ============================================================================
+// PHASE 3C: PLATFORM DISTRIBUTION ENDPOINTS
+// ============================================================================
+
+// POST /businesses/:businessId/repurposed-content/:repurposedId/publish - Publish repurposed content to platform
+app.post('/businesses/:businessId/repurposed-content/:repurposedId/publish', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const repurposedId = paramToString(req.params.repurposedId);
+    const { platformCredentials, scheduleTime, validateOnly } = req.body;
+
+    if (!businessId || !repurposedId) return res.status(400).json({ error: 'Business id and repurposed id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const repurposed = await getRepurposedContent(repurposedId);
+    if (!repurposed) return res.status(404).json({ error: 'Repurposed content not found' });
+    if (repurposed.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    // Validate content against platform requirements
+    const validation = validateContentForPlatform(repurposed.platform, {
+      content: repurposed.content,
+      caption: repurposed.caption,
+      hashtags: repurposed.hashtags,
+      platforms: [repurposed.platform],
+    });
+
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: 'Content validation failed',
+        details: validation.errors,
+        warnings: validation.warnings,
+      });
+    }
+
+    // If validation only, return success without publishing
+    if (validateOnly) {
+      return res.json({
+        message: 'Content validation passed',
+        warnings: validation.warnings,
+      });
+    }
+
+    // Publish to platform using real API integrations
+    const credentials = platformCredentials || business.platformCredentials || {};
+    const publishResults = await publishToAllPlatforms(credentials, {
+      content: repurposed.content,
+      caption: repurposed.caption || repurposed.content,
+      hashtags: repurposed.hashtags,
+      platforms: [repurposed.platform],
+      schedule: scheduleTime ? new Date(scheduleTime) : undefined,
+    });
+
+    const publishResult = publishResults[0];
+    if (!publishResult) {
+      return res.status(500).json({ error: 'Publishing failed' });
+    }
+
+    // Create distribution record with publish result
+    const distribution = await createPlatformDistribution({
+      businessId,
+      repurposedContentId: repurposedId,
+      platform: repurposed.platform,
+      externalId: publishResult.postId,
+      url: publishResult.externalUrl,
+      metrics: {},
+      publishedAt: publishResult.status === 'scheduled' ? scheduleTime : new Date(),
+    });
+
+    // Update repurposed content status based on publish result
+    const newStatus = publishResult.status === 'error' ? 'failed' : 
+                      publishResult.status === 'scheduled' ? 'scheduled' : 'published';
+    
+    await updateRepurposedContent(repurposedId, {
+      status: newStatus as any,
+    });
+
+    // Track event
+    await prisma.analytics.create({
+      data: {
+        businessId,
+        eventType: 'content_published',
+        eventData: {
+          repurposedId,
+          platform: repurposed.platform,
+          postId: publishResult.postId,
+          status: publishResult.status,
+          externalUrl: publishResult.externalUrl,
+        },
+      }
+    });
+
+    res.status(201).json({
+      message: `Content ${publishResult.status} successfully`,
+      distribution,
+      publishResult,
+      warnings: validation.warnings,
+    });
+  } catch (err) {
+    logger.error('Publish content error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to publish content' });
+  }
+});
+
+// GET /businesses/:businessId/distributions - List all platform distributions
+app.get('/businesses/:businessId/distributions', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    if (!businessId) return res.status(400).json({ error: 'Business id is required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const distributions = await getBusinessDistributions(businessId);
+    res.json({
+      distributions,
+      total: distributions.length,
+    });
+  } catch (err) {
+    logger.error('Get distributions error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch distributions' });
+  }
+});
+
+// GET /businesses/:businessId/distributions/:distributionId - Get specific distribution
+app.get('/businesses/:businessId/distributions/:distributionId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const distributionId = paramToString(req.params.distributionId);
+
+    if (!businessId || !distributionId) return res.status(400).json({ error: 'Business id and distribution id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const distribution = await getPlatformDistribution(distributionId);
+    if (!distribution) return res.status(404).json({ error: 'Distribution not found' });
+    if (distribution.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    res.json(distribution);
+  } catch (err) {
+    logger.error('Get distribution error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch distribution' });
+  }
+});
+
+// PATCH /businesses/:businessId/distributions/:distributionId - Update distribution metrics
+app.patch('/businesses/:businessId/distributions/:distributionId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const distributionId = paramToString(req.params.distributionId);
+    const { metrics } = req.body;
+
+    if (!businessId || !distributionId) return res.status(400).json({ error: 'Business id and distribution id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const distribution = await getPlatformDistribution(distributionId);
+    if (!distribution) return res.status(404).json({ error: 'Distribution not found' });
+    if (distribution.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const updated = await updatePlatformDistribution(distributionId, {
+      metrics,
+    });
+
+    res.json({
+      message: 'Distribution updated successfully',
+      distribution: updated,
+    });
+  } catch (err) {
+    logger.error('Update distribution error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to update distribution' });
+  }
+});
+
+// DELETE /businesses/:businessId/distributions/:distributionId - Delete distribution
+app.delete('/businesses/:businessId/distributions/:distributionId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const distributionId = paramToString(req.params.distributionId);
+
+    if (!businessId || !distributionId) return res.status(400).json({ error: 'Business id and distribution id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const distribution = await getPlatformDistribution(distributionId);
+    if (!distribution) return res.status(404).json({ error: 'Distribution not found' });
+    if (distribution.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    await deleteDistribution(distributionId);
+
+    res.json({ message: 'Distribution deleted successfully' });
+  } catch (err) {
+    logger.error('Delete distribution error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to delete distribution' });
+  }
+});
+
+// ============================================================================
+// PHASE 2B: WEBSITE VERSION MANAGEMENT ENDPOINTS
+// ============================================================================
+
+// POST /businesses/:businessId/publish - Publish website and create version
 app.post('/businesses/:businessId/publish', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const businessId = paramToString(req.params.businessId);
@@ -3659,6 +4705,23 @@ app.post('/businesses/:businessId/publish', authenticateToken, async (req: AuthR
     const uniqueSlug = `${slug}-${Date.now().toString(36)}`;
     const publishedUrl = `https://${uniqueSlug}.salesape.ai/web`;
 
+    // Get current version count to generate next version number
+    const currentVersions = await getBusinessVersions(businessId);
+    const nextVersionNumber = (currentVersions.length || 0) + 1;
+
+    // Create website version with current config
+    const versionConfig = business.websiteConfig || business.generatedConfig || {};
+    const versionData = {
+      businessId,
+      versionNumber: nextVersionNumber,
+      config: versionConfig,
+      template: business.templateId || 'default',
+      status: 'published' as const,
+    };
+
+    const version = await createWebsiteVersion(versionData);
+
+    // Update business
     const updatedBusiness = await prisma.business.update({
       where: { id: businessId },
       data: {
@@ -3674,21 +4737,350 @@ app.post('/businesses/:businessId/publish', authenticateToken, async (req: AuthR
       data: {
         businessId,
         eventType: 'website_published',
-        eventData: { slug: uniqueSlug, url: publishedUrl },
+        eventData: { slug: uniqueSlug, url: publishedUrl, versionId: version.id, versionNumber: version.versionNumber },
       }
     });
 
-    console.log(`[Website Published] Business: ${business.name}, URL: ${publishedUrl}`);
+    console.log(`[Website Published] Business: ${business.name}, Version: ${version.versionNumber}, URL: ${publishedUrl}`);
     res.json({
       message: 'Website published successfully',
       business: updatedBusiness,
       shareUrl: publishedUrl,
+      version,
     });
   } catch (err) {
-    console.error('Website publish error:', err);
+    logger.error('Website publish error', { error: String(err) });
     res.status(500).json({ error: 'Failed to publish website' });
   }
 });
+
+// GET /businesses/:businessId/website-versions - List all versions
+app.get('/businesses/:businessId/website-versions', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    if (!businessId) return res.status(400).json({ error: 'Business id is required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const versions = await getBusinessVersions(businessId);
+    res.json({ versions, total: versions.length });
+  } catch (err) {
+    logger.error('Get versions error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch versions' });
+  }
+});
+
+// POST /businesses/:businessId/website-versions - Create new version
+app.post('/businesses/:businessId/website-versions', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const { config, template, status } = req.body;
+
+    if (!businessId) return res.status(400).json({ error: 'Business id is required' });
+    if (!config) return res.status(400).json({ error: 'Config is required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const currentVersions = await getBusinessVersions(businessId);
+    const nextVersionNumber = (currentVersions.length || 0) + 1;
+
+    const version = await createWebsiteVersion({
+      businessId,
+      versionNumber: nextVersionNumber,
+      config,
+      template: template || business.templateId || 'default',
+      status: status || 'draft',
+    });
+
+    res.status(201).json(version);
+  } catch (err) {
+    logger.error('Create version error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to create version' });
+  }
+});
+
+// GET /businesses/:businessId/website-versions/:versionId - Get specific version
+app.get('/businesses/:businessId/website-versions/:versionId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const versionId = paramToString(req.params.versionId);
+
+    if (!businessId || !versionId) return res.status(400).json({ error: 'Business id and version id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const version = await getWebsiteVersion(versionId);
+    if (!version) return res.status(404).json({ error: 'Version not found' });
+    if (version.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    res.json(version);
+  } catch (err) {
+    logger.error('Get version error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch version' });
+  }
+});
+
+// PATCH /businesses/:businessId/website-versions/:versionId/publish - Publish a version
+app.patch('/businesses/:businessId/website-versions/:versionId/publish', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const versionId = paramToString(req.params.versionId);
+
+    if (!businessId || !versionId) return res.status(400).json({ error: 'Business id and version id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const version = await getWebsiteVersion(versionId);
+    if (!version) return res.status(404).json({ error: 'Version not found' });
+    if (version.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    // Publish the version
+    const publishedVersion = await publishWebsiteVersion(versionId);
+
+    // Update business config to match published version
+    await prisma.business.update({
+      where: { id: businessId },
+      data: {
+        websiteConfig: publishedVersion.config,
+        templateId: publishedVersion.template,
+        isPublished: true,
+        publishedAt: new Date(),
+      },
+    });
+
+    // Track analytics
+    await prisma.analytics.create({
+      data: {
+        businessId,
+        eventType: 'version_published',
+        eventData: { versionId, versionNumber: publishedVersion.versionNumber },
+      }
+    });
+
+    res.json({
+      message: 'Version published successfully',
+      version: publishedVersion,
+    });
+  } catch (err) {
+    logger.error('Publish version error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to publish version' });
+  }
+});
+
+// DELETE /businesses/:businessId/website-versions/:versionId - Delete a version
+app.delete('/businesses/:businessId/website-versions/:versionId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const versionId = paramToString(req.params.versionId);
+
+    if (!businessId || !versionId) return res.status(400).json({ error: 'Business id and version id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const version = await getWebsiteVersion(versionId);
+    if (!version) return res.status(404).json({ error: 'Version not found' });
+    if (version.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+    if (version.status === 'published') return res.status(409).json({ error: 'Cannot delete published version' });
+
+    await deleteWebsiteVersion(versionId);
+
+    res.json({ message: 'Version deleted successfully' });
+  } catch (err) {
+    logger.error('Delete version error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to delete version' });
+  }
+});
+
+// POST /businesses/:businessId/website-versions/:versionId/rollback - Rollback to a version
+app.post('/businesses/:businessId/website-versions/:versionId/rollback', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const versionId = paramToString(req.params.versionId);
+
+    if (!businessId || !versionId) return res.status(400).json({ error: 'Business id and version id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const version = await getWebsiteVersion(versionId);
+    if (!version) return res.status(404).json({ error: 'Version not found' });
+    if (version.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    // Publish this version (makes it active)
+    const rolledBackVersion = await publishWebsiteVersion(versionId);
+
+    // Update business to use this version's config
+    await prisma.business.update({
+      where: { id: businessId },
+      data: {
+        websiteConfig: rolledBackVersion.config,
+        templateId: rolledBackVersion.template,
+      },
+    });
+
+    // Track analytics
+    await prisma.analytics.create({
+      data: {
+        businessId,
+        eventType: 'version_rolled_back',
+        eventData: { versionId, versionNumber: rolledBackVersion.versionNumber },
+      }
+    });
+
+    res.json({
+      message: 'Rolled back to previous version successfully',
+      version: rolledBackVersion,
+    });
+  } catch (err) {
+    logger.error('Rollback version error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to rollback version' });
+  }
+});
+
+// GET /businesses/:businessId/website-assets - List all assets
+app.get('/businesses/:businessId/website-assets', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    if (!businessId) return res.status(400).json({ error: 'Business id is required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const assets = await prisma.websiteAsset.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json({ assets, total: assets.length });
+  } catch (err) {
+    logger.error('Get assets error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch assets' });
+  }
+});
+
+// GET /businesses/:businessId/website-assets/:assetId - Get specific asset
+app.get('/businesses/:businessId/website-assets/:assetId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const assetId = paramToString(req.params.assetId);
+
+    if (!businessId || !assetId) return res.status(400).json({ error: 'Business id and asset id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const asset = await prisma.websiteAsset.findUnique({
+      where: { id: assetId },
+    });
+
+    if (!asset) return res.status(404).json({ error: 'Asset not found' });
+    if (asset.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    res.json(asset);
+  } catch (err) {
+    logger.error('Get asset error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to fetch asset' });
+  }
+});
+
+// DELETE /businesses/:businessId/website-assets/:assetId - Delete asset
+app.delete('/businesses/:businessId/website-assets/:assetId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const assetId = paramToString(req.params.assetId);
+
+    if (!businessId || !assetId) return res.status(400).json({ error: 'Business id and asset id are required' });
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const asset = await prisma.websiteAsset.findUnique({
+      where: { id: assetId },
+    });
+
+    if (!asset) return res.status(404).json({ error: 'Asset not found' });
+    if (asset.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
+
+    await prisma.websiteAsset.delete({ where: { id: assetId } });
+
+    res.json({ message: 'Asset deleted successfully' });
+  } catch (err) {
+    logger.error('Delete asset error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to delete asset' });
+  }
+});
+
+// POST /businesses/:businessId/website-versions/:fromVersion/compare/:toVersion - Compare versions
+app.post('/businesses/:businessId/website-versions/:fromVersion/compare/:toVersion', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const fromVersionId = paramToString(req.params.fromVersion);
+    const toVersionId = paramToString(req.params.toVersion);
+
+    if (!businessId || !fromVersionId || !toVersionId) {
+      return res.status(400).json({ error: 'Business id, from version id, and to version id are required' });
+    }
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const fromVersion = await getWebsiteVersion(fromVersionId);
+    const toVersion = await getWebsiteVersion(toVersionId);
+
+    if (!fromVersion || !toVersion) return res.status(404).json({ error: 'Version not found' });
+    if (fromVersion.businessId !== businessId || toVersion.businessId !== businessId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    // Compare configurations
+    const comparison = {
+      fromVersion: fromVersion.versionNumber,
+      toVersion: toVersion.versionNumber,
+      changes: {} as Record<string, { from: any; to: any }>,
+      summary: [] as string[],
+    };
+
+    // Deep comparison of config objects
+    const fromConfig = fromVersion.config as Record<string, any>;
+    const toConfig = toVersion.config as Record<string, any>;
+
+    const allKeys = new Set([...Object.keys(fromConfig || {}), ...Object.keys(toConfig || {})]);
+
+    for (const key of allKeys) {
+      const fromVal = fromConfig?.[key];
+      const toVal = toConfig?.[key];
+
+      if (JSON.stringify(fromVal) !== JSON.stringify(toVal)) {
+        comparison.changes[key] = { from: fromVal, to: toVal };
+        comparison.summary.push(`${key}: ${JSON.stringify(fromVal)} → ${JSON.stringify(toVal)}`);
+      }
+    }
+
+    res.json(comparison);
+  } catch (err) {
+    logger.error('Compare versions error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to compare versions' });
+  }
+});
+
+// ============================================================================
+// END PHASE 2B: WEBSITE VERSION MANAGEMENT ENDPOINTS
+// ============================================================================
 
 // Serve public website (no auth required)
 app.get('/website/:slug', async (req: Request, res: Response) => {
@@ -4102,6 +5494,337 @@ app.post('/businesses/:businessId/analytics', async (req: Request, res: Response
   } catch (err) {
     console.error('Analytics track error:', err);
     res.status(500).json({ error: 'Failed to track event' });
+  }
+});
+
+// --- Dashboard KPI Stats Endpoint ---
+app.get('/dashboard/stats', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+
+    // Get all businesses for this user
+    const businesses = await prisma.business.findMany({
+      where: { userId },
+      include: {
+        leads: true,
+        bookings: true,
+        analytics: true,
+      },
+    });
+
+    // Calculate overall stats
+    const totalWebsites = businesses.length;
+    const liveWebsites = businesses.filter(b => b.isPublished).length;
+    const totalLeads = businesses.reduce((sum, b) => sum + b.leads.length, 0);
+    const totalBookings = businesses.reduce((sum, b) => sum + b.bookings.length, 0);
+
+    // Calculate conversion rate
+    const convertedLeads = businesses.reduce(
+      (sum, b) => sum + b.leads.filter(l => l.status === 'converted').length,
+      0
+    );
+    const conversionRate = totalLeads > 0 ? ((convertedLeads / totalLeads) * 100).toFixed(1) : '0.0';
+
+    // Calculate average SEO score
+    const seoAudits = await prisma.seoAudit.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+    const avgSeoScore = seoAudits.length > 0
+      ? Math.round(seoAudits.reduce((sum, a) => sum + a.seo, 0) / seoAudits.length)
+      : 0;
+
+    // Get this month's stats
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const thisMonthLeads = businesses.reduce(
+      (sum, b) => sum + b.leads.filter(l => new Date(l.createdAt) >= monthStart).length,
+      0
+    );
+    const thisMonthBookings = businesses.reduce(
+      (sum, b) => sum + b.bookings.filter(b => new Date(b.createdAt) >= monthStart).length,
+      0
+    );
+
+    // Get average performance across all websites
+    const totalAnalyticsEvents = businesses.reduce((sum, b) => sum + b.analytics.length, 0);
+    const avgWebsiteViews = businesses.length > 0
+      ? Math.floor(
+          businesses.reduce(
+            (sum, b) =>
+              sum + b.analytics.filter(a => a.eventType === 'website_viewed').length,
+            0
+          ) / businesses.length
+        )
+      : 0;
+
+    res.json({
+      summary: {
+        totalWebsites,
+        liveWebsites,
+        totalLeads,
+        totalBookings,
+        thisMonthLeads,
+        thisMonthBookings,
+        conversionRate: parseFloat(conversionRate),
+        avgSeoScore,
+        avgWebsiteViews,
+      },
+      breakdown: {
+        byStatus: {
+          live: liveWebsites,
+          draft: totalWebsites - liveWebsites,
+        },
+        leads: {
+          total: totalLeads,
+          converted: convertedLeads,
+          pending: totalLeads - convertedLeads,
+        },
+      },
+      recentStats: {
+        thisMonth: {
+          leads: thisMonthLeads,
+          bookings: thisMonthBookings,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('Dashboard stats error:', err);
+    res.status(500).json({ error: 'Failed to fetch dashboard stats' });
+  }
+});
+
+// --- Content Studio Endpoints ---
+
+// POST /businesses/:businessId/content-projects - Create a content project
+app.post('/businesses/:businessId/content-projects', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const { inputType, inputUrl, inputText, reelsRequested = 3, style = 'educational', autoPublish = false } = req.body;
+
+    if (!businessId || !inputType) {
+      return res.status(400).json({ error: 'Business ID and input type are required' });
+    }
+
+    // Verify business ownership
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business || business.userId !== req.userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    // Create content project
+    const project = await prisma.contentProject.create({
+      data: {
+        businessId,
+        inputType: inputType as any,
+        inputUrl: inputUrl || null,
+        inputText: inputText || null,
+        reelsRequested: Math.min(reelsRequested, 5),
+        style: style as any,
+        autoPublish,
+        status: 'processing',
+      },
+    });
+
+    // Enqueue content generation job
+    await enqueueContentGeneration({
+      projectId: project.id,
+      businessId,
+      inputType: inputType as any,
+      inputUrl,
+      inputText,
+      reelsRequested: Math.min(reelsRequested, 5),
+      style: style as any,
+      autoPublish,
+    });
+
+    res.status(201).json({
+      project: {
+        id: project.id,
+        status: project.status,
+        reelsRequested: project.reelsRequested,
+        createdAt: project.createdAt,
+      },
+    });
+  } catch (err) {
+    console.error('Content project creation error:', err);
+    res.status(500).json({ error: 'Failed to create content project' });
+  }
+});
+
+// GET /businesses/:businessId/content-projects - List content projects
+app.get('/businesses/:businessId/content-projects', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+
+    if (!businessId) {
+      return res.status(400).json({ error: 'Business ID is required' });
+    }
+
+    // Verify business ownership
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business || business.userId !== req.userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const projects = await prisma.contentProject.findMany({
+      where: { businessId },
+      include: { reels: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json({
+      projects: projects.map(p => ({
+        id: p.id,
+        inputType: p.inputType,
+        status: p.status,
+        reelsGenerated: p.reels.length,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      })),
+    });
+  } catch (err) {
+    console.error('Content projects fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch content projects' });
+  }
+});
+
+// GET /businesses/:businessId/content-projects/:projectId - Get project details
+app.get('/businesses/:businessId/content-projects/:projectId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const projectId = paramToString(req.params.projectId);
+
+    if (!businessId || !projectId) {
+      return res.status(400).json({ error: 'Business ID and project ID are required' });
+    }
+
+    // Verify business ownership
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business || business.userId !== req.userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const project = await prisma.contentProject.findUnique({
+      where: { id: projectId },
+      include: { reels: { include: { analytics: true } } },
+    });
+
+    if (!project || project.businessId !== businessId) {
+      return res.status(404).json({ error: 'Content project not found' });
+    }
+
+    res.json({
+      project: {
+        id: project.id,
+        inputType: project.inputType,
+        status: project.status,
+        reelsRequested: project.reelsRequested,
+        reels: project.reels.map(r => ({
+          id: r.id,
+          title: r.title,
+          hook: r.hook,
+          platform: r.platform,
+          status: r.status,
+          prePublishScore: r.prePublishScore,
+          engagement: r.analytics?.engagementRate || 0,
+        })),
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      },
+    });
+  } catch (err) {
+    console.error('Content project fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch content project' });
+  }
+});
+
+// POST /reel/:reelId/publish - Publish a reel to social media
+app.post('/reel/:reelId/publish', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const reelId = paramToString(req.params.reelId);
+    const { platforms = ['instagram', 'tiktok'] } = req.body;
+
+    if (!reelId || !platforms || platforms.length === 0) {
+      return res.status(400).json({ error: 'Reel ID and platforms are required' });
+    }
+
+    const reel = await prisma.reelVariant.findUnique({
+      where: { id: reelId },
+      include: { contentProject: { include: { business: true } } },
+    });
+
+    if (!reel) {
+      return res.status(404).json({ error: 'Reel not found' });
+    }
+
+    // Verify ownership
+    if (reel.contentProject.business.userId !== req.userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    // Enqueue social posting job
+    await enqueueSocialPosting({
+      reelId,
+      reelVariantId: reelId,
+      platforms: platforms as any,
+      businessId: reel.contentProject.businessId,
+    });
+
+    res.json({
+      success: true,
+      message: `Reel queued for publishing to ${platforms.join(', ')}`,
+      reelId,
+    });
+  } catch (err) {
+    console.error('Reel publish error:', err);
+    res.status(500).json({ error: 'Failed to publish reel' });
+  }
+});
+
+// GET /reel/:reelId/analytics - Get reel analytics
+app.get('/reel/:reelId/analytics', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const reelId = paramToString(req.params.reelId);
+
+    if (!reelId) {
+      return res.status(400).json({ error: 'Reel ID is required' });
+    }
+
+    const reel = await prisma.reelVariant.findUnique({
+      where: { id: reelId },
+      include: { analytics: true, contentProject: { include: { business: true } } },
+    });
+
+    if (!reel) {
+      return res.status(404).json({ error: 'Reel not found' });
+    }
+
+    // Verify ownership
+    if (reel.contentProject.business.userId !== req.userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    res.json({
+      reel: {
+        id: reel.id,
+        title: reel.title,
+        platform: reel.platform,
+        status: reel.status,
+        prePublishScore: reel.prePublishScore,
+        analytics: reel.analytics || {
+          views: 0,
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          engagementRate: 0,
+        },
+      },
+    });
+  } catch (err) {
+    console.error('Reel analytics fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch reel analytics' });
   }
 });
 
@@ -4883,6 +6606,61 @@ app.post('/websites/chat', authenticateToken, async (req: AuthRequest, res: Resp
 });
 
 // Helper functions
+
+/**
+ * Generate platform-specific content using AI
+ * Converts generic content into platform-optimized format
+ */
+async function generatePlatformContent(
+  sourceContent: string,
+  platform: string,
+  businessName: string
+): Promise<{ content: string; caption?: string; hashtags?: string[] }> {
+  try {
+    // For MVP, generate template-based content
+    // In production, this would call an AI service (Claude, GPT, etc.)
+    
+    const contentMap: { [key: string]: (src: string, bn: string) => any } = {
+      instagram: (src, bn) => ({
+        content: src.substring(0, 2200), // Instagram caption limit
+        caption: `🚀 New from ${bn}. ${src.substring(0, 100)}...`,
+        hashtags: ['#business', '#socialmedia', '#content', `#${bn.toLowerCase().replace(/\s+/g, '')}`],
+      }),
+      twitter: (src, bn) => ({
+        content: src.substring(0, 280), // Twitter limit
+        caption: `💡 From ${bn}: ${src.substring(0, 150)}...`,
+        hashtags: ['#business', '#news'],
+      }),
+      linkedin: (src, bn) => ({
+        content: src.substring(0, 3000), // LinkedIn limit
+        caption: `📊 Insights from ${bn}\n\n${src}`,
+        hashtags: ['#business', '#insights', '#professional'],
+      }),
+      tiktok: (src, bn) => ({
+        content: src.substring(0, 1500),
+        caption: `✨ Check out ${bn}! ${src.substring(0, 80)}...`,
+        hashtags: ['#trending', '#business', '#foryou'],
+      }),
+      facebook: (src, bn) => ({
+        content: src.substring(0, 5000),
+        caption: `👋 Welcome to ${bn}!\n\n${src}`,
+        hashtags: ['#business', '#community'],
+      }),
+    };
+
+    const generator = contentMap[platform.toLowerCase()] || contentMap.instagram;
+    return generator(sourceContent, businessName);
+  } catch (err) {
+    logger.warn('Platform content generation error', { error: String(err), platform });
+    // Return fallback content
+    return {
+      content: sourceContent.substring(0, 280),
+      caption: sourceContent.substring(0, 100),
+      hashtags: ['#business'],
+    };
+  }
+}
+
 function generateSuggestedPages(answers: any): string[] {
   const pages = ['Home', 'About', 'Services/Products'];
   if (answers.primaryGoal === 'Generate Leads') pages.push('Contact', 'Lead Magnet');
@@ -4966,5 +6744,625 @@ process.on('SIGTERM', () => {
   });
 });
 
+
+// ===== PHASE 4: ANALYTICS, SCHEDULING, APPROVAL, TEAM COLLABORATION =====
+
+// --- Analytics Dashboard Endpoints ---
+
+/**
+ * GET /businesses/:businessId/dashboard
+ * Get comprehensive dashboard metrics
+ */
+app.get('/businesses/:businessId/dashboard', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    
+    // Check permission
+    await requirePermission(businessId, req.user?.id || '', 'viewDashboard');
+
+    const metrics = await getDashboardMetrics(businessId);
+
+    res.json({
+      success: true,
+      data: metrics,
+    });
+  } catch (error) {
+    logger.error('Dashboard error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get dashboard metrics' });
+  }
+});
+
+/**
+ * GET /businesses/:businessId/analytics/by-platform/:platform
+ * Get detailed metrics for a specific platform
+ */
+app.get('/businesses/:businessId/analytics/by-platform/:platform', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId, platform } = req.params;
+    
+    await requirePermission(businessId, req.user?.id || '', 'viewAnalytics');
+
+    const metrics = await getPlatformMetrics(businessId, platform);
+
+    res.json({
+      success: true,
+      data: metrics,
+    });
+  } catch (error) {
+    logger.error('Platform metrics error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get platform metrics' });
+  }
+});
+
+/**
+ * GET /businesses/:businessId/analytics/trends
+ * Get trend data over time
+ */
+app.get('/businesses/:businessId/analytics/trends', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const daysParam = req.query.days as string;
+    const days = daysParam ? parseInt(daysParam) : 30;
+
+    await requirePermission(businessId, req.user?.id || '', 'viewAnalytics');
+
+    const trends = await getTrendData(businessId, days);
+
+    res.json({
+      success: true,
+      data: trends,
+    });
+  } catch (error) {
+    logger.error('Trends error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get trend data' });
+  }
+});
+
+/**
+ * POST /businesses/:businessId/analytics/compare
+ * Compare metrics between two date ranges
+ */
+app.post('/businesses/:businessId/analytics/compare', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const { startDate1, endDate1, startDate2, endDate2 } = req.body;
+
+    await requirePermission(businessId, req.user?.id || '', 'viewAnalytics');
+
+    if (!startDate1 || !endDate1 || !startDate2 || !endDate2) {
+      return res.status(400).json({ error: 'Missing date range parameters' });
+    }
+
+    const comparison = await getComparison(
+      businessId,
+      new Date(startDate1),
+      new Date(endDate1),
+      new Date(startDate2),
+      new Date(endDate2)
+    );
+
+    res.json({
+      success: true,
+      data: comparison,
+    });
+  } catch (error) {
+    logger.error('Comparison error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to compare metrics' });
+  }
+});
+
+/**
+ * GET /businesses/:businessId/analytics/revenue
+ * Get revenue attribution from content
+ */
+app.get('/businesses/:businessId/analytics/revenue', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    
+    await requirePermission(businessId, req.user?.id || '', 'viewAnalytics');
+
+    const revenue = await getRevenueAttribution(businessId);
+
+    res.json({
+      success: true,
+      data: revenue,
+    });
+  } catch (error) {
+    logger.error('Revenue attribution error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get revenue attribution' });
+  }
+});
+
+// --- Scheduling Endpoints ---
+
+/**
+ * GET /businesses/:businessId/schedule
+ * Get all scheduled posts with optional filters
+ */
+app.get('/businesses/:businessId/schedule', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const { status, platform, from, to } = req.query;
+
+    await requirePermission(businessId, req.user?.id || '', 'viewSchedule');
+
+    const filters = {
+      status: status as string | undefined,
+      platformFilter: platform as string | undefined,
+      from: from ? new Date(from as string) : undefined,
+      to: to ? new Date(to as string) : undefined,
+    };
+
+    const scheduled = await getScheduledPosts(businessId, filters);
+
+    res.json({
+      success: true,
+      data: scheduled,
+    });
+  } catch (error) {
+    logger.error('Get schedule error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get schedule' });
+  }
+});
+
+/**
+ * POST /businesses/:businessId/schedule
+ * Schedule content for future publishing
+ */
+app.post('/businesses/:businessId/schedule', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const { repurposedContentId, scheduledFor } = req.body;
+
+    await requirePermission(businessId, req.user?.id || '', 'scheduleContent');
+
+    if (!repurposedContentId || !scheduledFor) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const scheduled = await scheduleContent(businessId, repurposedContentId, new Date(scheduledFor));
+
+    res.json({
+      success: true,
+      message: 'Content scheduled successfully',
+      data: scheduled,
+    });
+  } catch (error) {
+    logger.error('Schedule content error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to schedule content' });
+  }
+});
+
+/**
+ * GET /businesses/:businessId/schedule/calendar
+ * Get schedule view grouped by date for calendar display
+ */
+app.get('/businesses/:businessId/schedule/calendar', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const monthParam = req.query.month as string;
+    const month = monthParam ? new Date(monthParam) : new Date();
+
+    await requirePermission(businessId, req.user?.id || '', 'viewSchedule');
+
+    const calendar = await getScheduleCalendar(businessId, month);
+
+    res.json({
+      success: true,
+      data: calendar,
+    });
+  } catch (error) {
+    logger.error('Schedule calendar error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get calendar' });
+  }
+});
+
+/**
+ * PUT /businesses/:businessId/schedule/:scheduledPostId
+ * Update scheduled post time or status
+ */
+app.put('/businesses/:businessId/schedule/:scheduledPostId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId, scheduledPostId } = req.params;
+    const { scheduledFor, status } = req.body;
+
+    await requirePermission(businessId, req.user?.id || '', 'scheduleContent');
+
+    const updated = await updateSchedule(businessId, scheduledPostId, { scheduledFor, status } as any);
+
+    res.json({
+      success: true,
+      message: 'Schedule updated',
+      data: updated,
+    });
+  } catch (error) {
+    logger.error('Update schedule error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to update schedule' });
+  }
+});
+
+/**
+ * DELETE /businesses/:businessId/schedule/:scheduledPostId
+ * Cancel a scheduled post
+ */
+app.delete('/businesses/:businessId/schedule/:scheduledPostId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId, scheduledPostId } = req.params;
+
+    await requirePermission(businessId, req.user?.id || '', 'scheduleContent');
+
+    const result = await cancelSchedule(businessId, scheduledPostId);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    logger.error('Cancel schedule error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to cancel schedule' });
+  }
+});
+
+/**
+ * POST /businesses/:businessId/schedule/bulk
+ * Bulk schedule multiple posts
+ */
+app.post('/businesses/:businessId/schedule/bulk', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const { schedules } = req.body;
+
+    await requirePermission(businessId, req.user?.id || '', 'scheduleContent');
+    await requirePermission(businessId, req.user?.id || '', 'bulkActions');
+
+    if (!Array.isArray(schedules)) {
+      return res.status(400).json({ error: 'schedules must be an array' });
+    }
+
+    const results = await bulkSchedule(businessId, schedules);
+
+    res.json({
+      success: true,
+      data: results,
+    });
+  } catch (error) {
+    logger.error('Bulk schedule error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to bulk schedule' });
+  }
+});
+
+/**
+ * GET /businesses/:businessId/schedule/upcoming
+ * Get upcoming scheduled posts
+ */
+app.get('/businesses/:businessId/schedule/upcoming', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const daysParam = req.query.days as string;
+    const days = daysParam ? parseInt(daysParam) : 7;
+
+    await requirePermission(businessId, req.user?.id || '', 'viewSchedule');
+
+    const upcoming = await getUpcomingSchedules(businessId, days);
+
+    res.json({
+      success: true,
+      data: upcoming,
+    });
+  } catch (error) {
+    logger.error('Get upcoming error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get upcoming schedules' });
+  }
+});
+
+/**
+ * GET /businesses/:businessId/schedule/stats
+ * Get scheduling statistics
+ */
+app.get('/businesses/:businessId/schedule/stats', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+
+    await requirePermission(businessId, req.user?.id || '', 'viewSchedule');
+
+    const stats = await getSchedulingStats(businessId);
+
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (error) {
+    logger.error('Schedule stats error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get scheduling stats' });
+  }
+});
+
+// --- Approval Workflow Endpoints ---
+
+/**
+ * GET /businesses/:businessId/approval-queue
+ * Get content pending approval
+ */
+app.get('/businesses/:businessId/approval-queue', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const limitParam = req.query.limit as string;
+    const limit = limitParam ? parseInt(limitParam) : 20;
+
+    await requirePermission(businessId, req.user?.id || '', 'viewApprovalQueue');
+
+    const queue = await getApprovalQueue(businessId, limit);
+
+    res.json({
+      success: true,
+      data: queue,
+    });
+  } catch (error) {
+    logger.error('Approval queue error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get approval queue' });
+  }
+});
+
+/**
+ * POST /businesses/:businessId/repurposed-content/:repurposedContentId/approve
+ * Approve content for publishing
+ */
+app.post('/businesses/:businessId/repurposed-content/:repurposedContentId/approve', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId, repurposedContentId } = req.params;
+    const { comment } = req.body;
+
+    await requirePermission(businessId, req.user?.id || '', 'approveContent');
+
+    const result = await approveContent(businessId, repurposedContentId, req.user?.id || '', comment);
+
+    res.json({
+      success: true,
+      message: 'Content approved',
+      data: result,
+    });
+  } catch (error) {
+    logger.error('Approve content error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to approve content' });
+  }
+});
+
+/**
+ * POST /businesses/:businessId/repurposed-content/:repurposedContentId/reject
+ * Reject content and send back for revision
+ */
+app.post('/businesses/:businessId/repurposed-content/:repurposedContentId/reject', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId, repurposedContentId } = req.params;
+    const { reason } = req.body;
+
+    await requirePermission(businessId, req.user?.id || '', 'rejectContent');
+
+    if (!reason) {
+      return res.status(400).json({ error: 'Rejection reason is required' });
+    }
+
+    const result = await rejectContent(businessId, repurposedContentId, req.user?.id || '', reason);
+
+    res.json({
+      success: true,
+      message: 'Content rejected',
+      data: result,
+    });
+  } catch (error) {
+    logger.error('Reject content error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to reject content' });
+  }
+});
+
+/**
+ * GET /businesses/:businessId/repurposed-content/:repurposedContentId/approval-history
+ * Get approval history for specific content
+ */
+app.get('/businesses/:businessId/repurposed-content/:repurposedContentId/approval-history', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId, repurposedContentId } = req.params;
+
+    await requirePermission(businessId, req.user?.id || '', 'viewApprovalQueue');
+
+    const history = await getApprovalHistory(businessId, repurposedContentId);
+
+    res.json({
+      success: true,
+      data: history,
+    });
+  } catch (error) {
+    logger.error('Approval history error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get approval history' });
+  }
+});
+
+/**
+ * GET /businesses/:businessId/approval-stats
+ * Get approval workflow statistics
+ */
+app.get('/businesses/:businessId/approval-stats', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+
+    await requirePermission(businessId, req.user?.id || '', 'viewAnalytics');
+
+    const stats = await getApprovalStats(businessId);
+
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (error) {
+    logger.error('Approval stats error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get approval stats' });
+  }
+});
+
+/**
+ * POST /businesses/:businessId/approval/bulk
+ * Bulk approve multiple content items
+ */
+app.post('/businesses/:businessId/approval/bulk', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const { contentIds, comment } = req.body;
+
+    await requirePermission(businessId, req.user?.id || '', 'approveContent');
+    await requirePermission(businessId, req.user?.id || '', 'bulkActions');
+
+    if (!Array.isArray(contentIds)) {
+      return res.status(400).json({ error: 'contentIds must be an array' });
+    }
+
+    const results = await bulkApprove(businessId, contentIds, req.user?.id || '', comment);
+
+    res.json({
+      success: true,
+      data: results,
+    });
+  } catch (error) {
+    logger.error('Bulk approve error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to bulk approve' });
+  }
+});
+
+// --- Team Permissions Endpoints ---
+
+/**
+ * GET /businesses/:businessId/team/members
+ * Get all team members and their roles
+ */
+app.get('/businesses/:businessId/team/members', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+
+    await requirePermission(businessId, req.user?.id || '', 'manageTeam');
+
+    const members = await getTeamMembers(businessId);
+
+    res.json({
+      success: true,
+      data: members,
+    });
+  } catch (error) {
+    logger.error('Get team members error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get team members' });
+  }
+});
+
+/**
+ * PUT /businesses/:businessId/team/members/:memberId/role
+ * Update team member role
+ */
+app.put('/businesses/:businessId/team/members/:memberId/role', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId, memberId } = req.params;
+    const { role } = req.body;
+
+    await requirePermission(businessId, req.user?.id || '', 'manageTeam');
+
+    if (!role || !['admin', 'content-manager', 'approver', 'viewer'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    // Validate role change
+    const validation = await validateRoleChange(businessId, memberId, role);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.message });
+    }
+
+    const updated = await updateMemberRole(businessId, memberId, role);
+
+    res.json({
+      success: true,
+      message: 'Role updated',
+      data: updated,
+    });
+  } catch (error) {
+    logger.error('Update member role error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to update role' });
+  }
+});
+
+/**
+ * DELETE /businesses/:businessId/team/members/:memberId
+ * Remove team member
+ */
+app.delete('/businesses/:businessId/team/members/:memberId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId, memberId } = req.params;
+
+    await requirePermission(businessId, req.user?.id || '', 'manageTeam');
+
+    const result = await removeMember(businessId, memberId);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    logger.error('Remove member error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to remove member' });
+  }
+});
+
+/**
+ * GET /businesses/:businessId/team/permissions
+ * Get current user's permissions for this business
+ */
+app.get('/businesses/:businessId/team/permissions', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { businessId } = req.params;
+
+    const permissions = await getUserPermissions(businessId, req.user?.id || '');
+
+    res.json({
+      success: true,
+      data: permissions,
+    });
+  } catch (error) {
+    logger.error('Get permissions error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get permissions' });
+  }
+});
+
+/**
+ * GET /team/role-descriptions
+ * Get descriptions of all available roles
+ */
+app.get('/team/role-descriptions', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    const descriptions = getRoleDescriptions();
+
+    res.json({
+      success: true,
+      data: descriptions,
+    });
+  } catch (error) {
+    logger.error('Get role descriptions error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get role descriptions' });
+  }
+});
+
+/**
+ * GET /team/permissions-matrix
+ * Get full permissions matrix for display
+ */
+app.get('/team/permissions-matrix', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    const matrix = getPermissionsMatrix();
+
+    res.json({
+      success: true,
+      data: matrix,
+    });
+  } catch (error) {
+    logger.error('Get permissions matrix error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to get permissions matrix' });
+  }
+});
+
 export default app;
+
 

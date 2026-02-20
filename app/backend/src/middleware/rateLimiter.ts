@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 /**
  * Rate limiting configuration for API protection
@@ -91,17 +91,16 @@ export const conversationLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {
-    // Rate limit by user ID from JWT token, fallback to IP
+    // Rate limit by user ID from JWT token, fallback to express-rate-limit's
+    // ipKeyGenerator which correctly handles IPv6 addresses.
     const authHeader = req.headers['authorization'];
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
-        // For rate limiting purposes, we'll use the Authorization header as a key
-        // In a real scenario, you'd extract and use the actual user ID
         return authHeader.replace(/^Bearer\s+/i, '').substring(0, 20);
       } catch (e) {
-        return req.ip || 'unknown';
+        return ipKeyGenerator(req as any);
       }
     }
-    return req.ip || 'unknown';
+    return ipKeyGenerator(req as any);
   },
 });

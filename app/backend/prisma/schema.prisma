@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,239 +8,246 @@ datasource db {
 }
 
 model User {
-  id        String    @id @default(cuid())
-  email     String    @unique
-  password  String
-  name      String
-  refreshToken String?
-  businesses Business[]
-  teamMemberships TeamMember[]
+  id                   String                @id @default(cuid())
+  email                String                @unique
+  password             String
+  name                 String
+  refreshToken         String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  businesses           Business[]
   conversationSessions ConversationSession[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  teamMemberships      TeamMember[]
+  approvalsGiven       ApprovalHistory[]
 }
 
 model Business {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  url         String
-  description String?
-  logo        String?
-  phone       String?
-  address     String?
-  hours       Json?  // { mon_fri: "7am - 8pm", sat_sun: "8am - 9pm" } or custom
-  views       Int     @default(0)  // Page view counter
-  publishedUrl String?
-  analysis    Json?
-  generatedConfig Json?
-  isPublished Boolean   @default(false)
-  publishedAt DateTime?
-  slug        String?   @unique
-  // Website Generation Engine fields
-  templateId       String?
-  websiteConfig    Json?
-  generationStatus String   @default("idle") // idle, queued, processing, completed, failed
-  generationStep   String?  // Current step: scraping, analyzing, selecting_template, generating_config, enriching_images
-  imageAssets      Json?    // { hero: string, gallery: string[] }
-  // Encrypted credentials for third-party integrations
-  googleCalendarTokens String?  // Encrypted JSON: {accessToken, refreshToken}
-  outlookCalendarTokens String?  // Encrypted JSON: {accessToken, refreshToken}
-  apiKeysEncrypted String?  // Encrypted JSON: {openai, other}
-  leads       Lead[]
-  bookings    Booking[]
-  calendarBookings CalendarBooking[]
-  availableSlots AvailableSlot[]
-  emailSequences EmailSequence[]
-  analytics   Analytics[]
-  abTests     ABTest[]
-  testimonials Testimonial[]
-  team        Team?
-  subscription Subscription?
-  payments    Payment[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                     String                  @id @default(cuid())
+  userId                 String
+  name                   String
+  url                    String
+  description            String?
+  logo                   String?
+  publishedUrl           String?
+  analysis               Json?
+  generatedConfig        Json?
+  isPublished            Boolean                 @default(false)
+  publishedAt            DateTime?
+  slug                   String?                 @unique
+  googleCalendarTokens   String?
+  outlookCalendarTokens  String?
+  apiKeysEncrypted       String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  address                String?
+  hours                  Json?
+  phone                  String?
+  views                  Int                     @default(0)
+  abTests                ABTest[]
+  analytics              Analytics[]
+  availableSlots         AvailableSlot[]
+  bookings               Booking[]
+  user                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  calendarBookings       CalendarBooking[]
+  emailSequences         EmailSequence[]
+  leads                  Lead[]
+  payments               Payment[]
+  subscription           Subscription?
+  team                   Team?
+  testimonials           Testimonial[]
+  // New relationships
+  websiteVersions        WebsiteVersion[]
+  websiteAssets          WebsiteAsset[]
+  contentInputs          ContentInput[]
+  repurposedContent      RepurposedContent[]
+  platformDistributions  PlatformDistribution[]
+  analyticsSnapshots     AnalyticsSnapshot[]
+  connectedAccounts      ConnectedAccount[]
+  publishingControl      PublishingControl?
+  growthModeSettings     GrowthModeSettings?
+  bookingConfig          BookingConfig?
+  scheduledPosts         ScheduledPost[]
+  approvalHistory        ApprovalHistory[]
 }
 
 model Lead {
-  id        String    @id @default(cuid())
+  id         String   @id @default(cuid())
   businessId String
-  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  name      String
-  email     String
-  company   String?
-  message   String?
-  status    String    @default("new")  // new, contacted, converted, declined
-  source    String?   // web, instagram, direct
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  name       String
+  email      String
+  company    String?
+  message    String?
+  status     String   @default("new")
+  source     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model Booking {
-  id        String    @id @default(cuid())
+  id         String   @id @default(cuid())
   businessId String
-  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  name      String
-  email     String
-  date      String
-  time      String
-  status    String    @default("confirmed")
-  createdAt DateTime  @default(now())
+  name       String
+  email      String
+  date       String
+  time       String
+  status     String   @default("confirmed")
+  createdAt  DateTime @default(now())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@unique([businessId, date, time])
 }
 
 model Testimonial {
-  id        String    @id @default(cuid())
-  businessId String
-  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  clientName String
-  clientTitle String?  // "CEO at Acme Co", "Happy Customer", etc.
-  content   String     // The testimonial text
-  rating    Int?       // 1-5 stars (optional)
-  imageUrl  String?    // Avatar/photo of client (optional)
+  id          String   @id @default(cuid())
+  businessId  String
+  clientName  String
+  clientTitle String?
+  content     String
+  rating      Int?
+  imageUrl    String?
   isPublished Boolean  @default(true)
-  order     Int        @default(0)  // Display order
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model AvailableSlot {
-  id        String    @id @default(cuid())
+  id         String   @id @default(cuid())
   businessId String
-  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  dayOfWeek Int       // 0-6 (Sunday-Saturday)
-  startTime String    // HH:mm format
-  endTime   String    // HH:mm format
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  dayOfWeek  Int
+  startTime  String
+  endTime    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model EmailSequence {
-  id        String    @id @default(cuid())
-  businessId String
-  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  name      String    // "new_lead", "booking_reminder", etc.
-  subject   String
-  body      String    // HTML email body
-  delayMinutes Int   @default(0)  // delay before sending
-  triggerEvent String // "lead_created", "booking_created", "lead_contacted"
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id           String   @id @default(cuid())
+  businessId   String
+  name         String
+  subject      String
+  body         String
+  delayMinutes Int      @default(0)
+  triggerEvent String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model Analytics {
-  id        String    @id @default(cuid())
+  id         String   @id @default(cuid())
   businessId String
-  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  eventType String    // "lead_created", "booking_created", "website_viewed", "form_submitted"
-  eventData Json?
-  source    String?   // web, instagram, direct, sms
-  createdAt DateTime  @default(now())
+  eventType  String
+  eventData  Json?
+  source     String?
+  createdAt  DateTime @default(now())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model Team {
-  id        String    @id @default(cuid())
-  businessId String    @unique
-  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  name      String
-  members   TeamMember[]
+  id               String            @id @default(cuid())
+  businessId       String            @unique
+  name             String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
   leadRoutingRules LeadRoutingRule[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  business         Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  members          TeamMember[]
 }
 
 model TeamMember {
   id        String    @id @default(cuid())
   teamId    String
-  team      Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
   userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      String    @default("member")  // admin, manager, member
+  role      String    @default("member")
   email     String
-  status    String    @default("invited")  // invited, active
+  status    String    @default("invited")
   invitedAt DateTime  @default(now())
   joinedAt  DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  team      Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([teamId, email])
 }
 
 model LeadRoutingRule {
-  id        String    @id @default(cuid())
-  teamId    String
-  team      Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  assignTo  String    // email of team member
-  service   String?   // specific service type (null = all services)
-  leadSource String?  // web, instagram, direct, sms (null = all sources)
-  priority  Int       @default(0)
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id         String   @id @default(cuid())
+  teamId     String
+  assignTo   String
+  service    String?
+  leadSource String?
+  priority   Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  team       Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
 }
 
 model Subscription {
-  id        String    @id @default(cuid())
-  businessId String    @unique
-  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  planId    String    // basic, pro, enterprise
-  status    String    @default("active")  // active, canceled, expired
-  stripeCustomerId String?
+  id                   String   @id @default(cuid())
+  businessId           String   @unique
+  planId               String
+  status               String   @default("active")
+  stripeCustomerId     String?
   stripeSubscriptionId String?
-  currentPeriodStart DateTime
-  currentPeriodEnd DateTime
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  business             Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model Payment {
-  id        String    @id @default(cuid())
-  businessId String
-  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id              String   @id @default(cuid())
+  businessId      String
   stripePaymentId String?
-  amount    Int       // amount in cents
-  currency  String    @default("usd")
-  status    String    @default("pending")  // pending, succeeded, failed
-  description String?
-  invoiceUrl String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  amount          Int
+  currency        String   @default("usd")
+  status          String   @default("pending")
+  description     String?
+  invoiceUrl      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model ABTest {
-  id        String    @id @default(cuid())
+  id         String    @id @default(cuid())
   businessId String
-  business  Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  name      String
-  variantA  Json      // {headline, cta, image, color}
-  variantB  Json      // {headline, cta, image, color}
-  status    String    @default("running")  // running, completed, paused
-  winner    String?   // a, b, or null if no winner
-  confidence Int      @default(0)  // 0-100
-  metricsA  Json?     // {views, clicks, conversions, ctr, conversionRate}
-  metricsB  Json?     // {views, clicks, conversions, ctr, conversionRate}
-  startDate DateTime  @default(now())
-  endDate   DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  name       String
+  variantA   Json
+  variantB   Json
+  status     String    @default("running")
+  winner     String?
+  confidence Int       @default(0)
+  metricsA   Json?
+  metricsB   Json?
+  startDate  DateTime  @default(now())
+  endDate    DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model SeoAudit {
-  id        String   @id @default(cuid())
-  userId    String?
-  businessId String?
-  url       String
-  performance Int
-  seo        Int
-  accessibility Int
-  bestPractices Int
-  issues     Json?
+  id              String   @id @default(cuid())
+  userId          String?
+  businessId      String?
+  url             String
+  performance     Int
+  seo             Int
+  accessibility   Int
+  bestPractices   Int
+  issues          Json?
   recommendations Json?
-  raw        Json?
-  createdAt  DateTime @default(now())
+  raw             Json?
+  createdAt       DateTime @default(now())
 }
 
 model AuditUsage {
@@ -263,27 +264,27 @@ model AuditUsage {
 model CalendarBooking {
   id         String   @id @default(cuid())
   businessId String
-  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   leadId     String?
-  provider   String   // google | calendly
+  provider   String
   startTime  DateTime
   endTime    DateTime
   createdAt  DateTime @default(now())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 model PublicSeoAudit {
-  id        String   @id @default(cuid())
-  url       String
-  email     String   // Email of person requesting audit
-  ipAddress String   // IP address for rate limiting (1 per week)
-  performance Int
-  seo        Int
-  mobile     Int
-  overallScore Int
-  issues     Json?
+  id              String   @id @default(cuid())
+  url             String
+  email           String
+  ipAddress       String
+  performance     Int
+  seo             Int
+  mobile          Int
+  overallScore    Int
+  issues          Json?
   recommendations Json?
-  raw        Json?
-  createdAt  DateTime @default(now())
+  raw             Json?
+  createdAt       DateTime @default(now())
 
   @@index([ipAddress, createdAt])
   @@index([email, createdAt])
@@ -292,13 +293,225 @@ model PublicSeoAudit {
 model ConversationSession {
   id        String   @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages  Json     // Array of { role: "user" | "assistant", content: string, timestamp: DateTime }
-  extracted Json?    // Extracted BusinessUnderstanding that matches schema
-  status    String   @default("active")  // active, completed, abandoned
+  messages  Json
+  extracted Json?
+  status    String   @default("active")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
 }
 
+model VisitLog {
+  ipDate    String   @id
+  clientIp  String
+  visitDate String
+  createdAt DateTime @default(now())
+
+  @@index([clientIp, visitDate])
+}
+
+// ===== NEW MODELS FOR WORKFLOW =====
+
+model WebsiteVersion {
+  id           String   @id @default(cuid())
+  businessId   String
+  versionNumber Int
+  config       Json
+  template     String
+  status       String   @default("draft") // draft, published, archived
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, versionNumber])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+}
+
+model WebsiteAsset {
+  id         String   @id @default(cuid())
+  businessId String
+  type       String   // logo, image, icon, etc
+  url        String
+  source     String   // extracted, generated, uploaded
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, type])
+  @@index([businessId, source])
+}
+
+model ContentInput {
+  id                String               @id @default(cuid())
+  businessId        String
+  type              String               // text, video, audio, blog_url
+  title             String?
+  content           String?
+  url               String?
+  storagePath       String?
+  status            String               @default("processing") // processing, ready, failed
+  metadata          Json?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  business          Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  repurposedContent RepurposedContent[]
+
+  @@index([businessId, status])
+  @@index([businessId, type])
+  @@index([businessId, createdAt])
+}
+
+model RepurposedContent {
+  id                String                 @id @default(cuid())
+  businessId        String
+  contentInputId    String
+  platform          String                 // instagram, tiktok, youtube, twitter, linkedin
+  content           String
+  caption           String?
+  hashtags          Json?
+  status            String                 @default("draft") // draft, approved, published
+  publishedAt       DateTime?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  contentInput      ContentInput           @relation(fields: [contentInputId], references: [id], onDelete: Cascade)
+  business          Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  distributions     PlatformDistribution[]
+  scheduledPosts    ScheduledPost[]
+  approvalHistory   ApprovalHistory[]
+
+  @@index([businessId, platform])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@index([contentInputId])
+}
+
+model PlatformDistribution {
+  id                  String            @id @default(cuid())
+  businessId          String
+  repurposedContentId String
+  platform            String
+  externalId          String?
+  url                 String?
+  metrics             Json?             // views, likes, shares, comments, etc
+  publishedAt         DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  repurposedContent   RepurposedContent @relation(fields: [repurposedContentId], references: [id], onDelete: Cascade)
+  business            Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, platform])
+  @@index([businessId, createdAt])
+  @@index([repurposedContentId])
+}
+
+model AnalyticsSnapshot {
+  id                    String   @id @default(cuid())
+  businessId            String
+  snapshotDate          DateTime
+  engagementRate        Float    @default(0)
+  completionRate        Float    @default(0)
+  viewVelocity          Float    @default(0)
+  ctr                   Float    @default(0)
+  conversionSignals     Int      @default(0)
+  aiCitationFrequency   Float    @default(0)
+  seoImpactTrend        String   @default("neutral") // positive, neutral, negative
+  aeoImpactTrend        String   @default("neutral") // positive, neutral, negative
+  metadata              Json?
+  createdAt             DateTime @default(now())
+  business              Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, snapshotDate])
+  @@index([businessId, snapshotDate])
+  @@index([businessId, createdAt])
+}
+
+model ConnectedAccount {
+  id           String   @id @default(cuid())
+  businessId   String
+  platform     String   // instagram, tiktok, youtube, twitter, linkedin, facebook
+  accountId    String
+  accountName  String?
+  accessToken  String
+  refreshToken String?
+  expiresAt    DateTime?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, platform, accountId])
+  @@index([businessId, platform])
+  @@index([businessId, isActive])
+}
+
+model PublishingControl {
+  id                String   @id @default(cuid())
+  businessId        String   @unique
+  requiresApproval  Boolean  @default(false)
+  autoPublish       Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model GrowthModeSettings {
+  id            String   @id @default(cuid())
+  businessId    String   @unique
+  mode          String   @default("BALANCED") // CONSERVATIVE, BALANCED, AGGRESSIVE
+  outputLimit   Int      @default(5)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model BookingConfig {
+  id                 String   @id @default(cuid())
+  businessId         String   @unique
+  isEnabled          Boolean  @default(true)
+  timezone           String   @default("UTC")
+  requiresApproval   Boolean  @default(false)
+  notificationEmail  String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+// Phase 4: Scheduling & Approval Models
+model ScheduledPost {
+  id                  String            @id @default(cuid())
+  businessId          String
+  repurposedContentId String
+  scheduledFor        DateTime
+  status              String            @default("pending") // pending, published, failed, cancelled
+  error               String?
+  publishedAt         DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  business            Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  repurposedContent   RepurposedContent @relation(fields: [repurposedContentId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, scheduledFor])
+  @@index([repurposedContentId])
+  @@index([status, scheduledFor])
+}
+
+model ApprovalHistory {
+  id                  String            @id @default(cuid())
+  businessId          String
+  repurposedContentId String
+  action              String            // approved, rejected, published, submitted_for_approval
+  approvedBy          String?           // userId or null for system actions
+  comment             String?
+  createdAt           DateTime          @default(now())
+  business            Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  repurposedContent   RepurposedContent @relation(fields: [repurposedContentId], references: [id], onDelete: Cascade)
+  approver            User?             @relation(fields: [approvedBy], references: [id], onDelete: SetNull)
+
+  @@index([businessId, repurposedContentId])
+  @@index([businessId, createdAt])
+  @@index([repurposedContentId])
+}
