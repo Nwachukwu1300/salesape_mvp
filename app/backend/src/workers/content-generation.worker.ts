@@ -23,6 +23,7 @@ import * as fs from 'fs';
 import type { ContentGenerationJob } from '../queues/index.js';
 import { processVideo, getVideoMetadata } from '../services/video-processor.service.js';
 import { enhanceReelCaption } from '../services/seo-aeo-enhancement.service.js';
+import { getRedisClient, createRedisClient } from '../utils/redis-client.js';
 
 const prisma = new PrismaClient();
 

@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
-import { Logo } from '../components/Logo';
-import { Button } from '../components/Button';
-import { Card, CardHeader, CardContent } from '../components/Card';
-import { Badge } from '../components/Badge';
-import { useAuth } from '../contexts/AuthContext';
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
+import { getAccessToken } from "../lib/supabase";
+import { Logo } from "../components/Logo";
+import { Button } from "../components/Button";
+import { Card, CardHeader, CardContent } from "../components/Card";
+import { Badge } from "../components/Badge";
+import { useAuth } from "../contexts/AuthContext";
 import {
   ArrowLeft,
   Calendar,
@@ -15,7 +16,7 @@ import {
   CheckCircle,
   AlertCircle,
   Loader2,
-} from 'lucide-react';
+} from "lucide-react";
 
 interface Booking {
   id: string;
@@ -34,7 +35,7 @@ export function ManageBookings() {
   const { user } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteBookingId, setDeleteBookingId] = useState<string | null>(null);
@@ -45,20 +46,23 @@ export function ManageBookings() {
     const fetchAllBookings = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem('supabase.auth.token');
+        const token = getAccessToken();
         if (!token) {
-          setError('Please log in to view bookings');
-          navigate('/');
+          setError("Please log in to view bookings");
+          navigate("/");
           return;
         }
 
         // First, fetch all businesses
-        const businessesResponse = await fetch('http://localhost:3001/businesses', {
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
+        const businessesResponse = await fetch(
+          "http://localhost:3001/businesses",
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
 
         if (!businessesResponse.ok) {
-          throw new Error('Failed to fetch businesses');
+          throw new Error("Failed to fetch businesses");
         }
 
         const businesses = await businessesResponse.json();
@@ -69,7 +73,7 @@ export function ManageBookings() {
           try {
             const bookingsResponse = await fetch(
               `http://localhost:3001/businesses/${business.id}/bookings`,
-              { headers: { 'Authorization': `Bearer ${token}` } }
+              { headers: { Authorization: `Bearer ${token}` } },
             );
 
             if (bookingsResponse.ok) {
@@ -83,7 +87,10 @@ export function ManageBookings() {
               allBookings.push(...enrichedBookings);
             }
           } catch (err) {
-            console.error(`Failed to fetch bookings for business ${business.id}:`, err);
+            console.error(
+              `Failed to fetch bookings for business ${business.id}:`,
+              err,
+            );
           }
         }
 
@@ -95,10 +102,10 @@ export function ManageBookings() {
         });
 
         setBookings(allBookings);
-        setError('');
+        setError("");
       } catch (err: any) {
-        console.error('Failed to fetch bookings:', err);
-        setError(err.message || 'Failed to load bookings');
+        console.error("Failed to fetch bookings:", err);
+        setError(err.message || "Failed to load bookings");
       } finally {
         setLoading(false);
       }
@@ -112,29 +119,29 @@ export function ManageBookings() {
 
     try {
       setDeleting(true);
-      const token = localStorage.getItem('supabase.auth.token');
-      const booking = bookings.find(b => b.id === deleteBookingId);
+      const token = getAccessToken();
+      const booking = bookings.find((b) => b.id === deleteBookingId);
 
       if (!booking) return;
 
       const response = await fetch(
         `http://localhost:3001/businesses/${booking.businessId}/bookings/${deleteBookingId}`,
         {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token}` },
-        }
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        },
       );
 
       if (!response.ok) {
-        throw new Error('Failed to delete booking');
+        throw new Error("Failed to delete booking");
       }
 
-      setBookings(bookings.filter(b => b.id !== deleteBookingId));
+      setBookings(bookings.filter((b) => b.id !== deleteBookingId));
       setShowDeleteConfirm(false);
       setDeleteBookingId(null);
     } catch (err) {
-      console.error('Failed to delete booking:', err);
-      setError('Failed to delete booking');
+      console.error("Failed to delete booking:", err);
+      setError("Failed to delete booking");
     } finally {
       setDeleting(false);
     }
@@ -146,11 +153,19 @@ export function ManageBookings() {
     today.setHours(0, 0, 0, 0);
 
     if (bookingDate < today) {
-      return { status: 'completed', color: 'text-green-600', badge: 'completed' };
+      return {
+        status: "completed",
+        color: "text-green-600",
+        badge: "completed",
+      };
     } else if (bookingDate.toDateString() === today.toDateString()) {
-      return { status: 'today', color: 'text-blue-600', badge: 'today' };
+      return { status: "today", color: "text-blue-600", badge: "today" };
     } else {
-      return { status: 'upcoming', color: 'text-orange-600', badge: 'upcoming' };
+      return {
+        status: "upcoming",
+        color: "text-orange-600",
+        badge: "upcoming",
+      };
     }
   };
 
@@ -164,7 +179,7 @@ export function ManageBookings() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => navigate('/dashboard')}
+                onClick={() => navigate("/dashboard")}
               >
                 <ArrowLeft className="w-4 h-4" />
               </Button>
@@ -202,7 +217,9 @@ export function ManageBookings() {
                     <Calendar className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Total Bookings</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Total Bookings
+                    </p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-white">
                       {bookings.length}
                     </p>
@@ -218,9 +235,14 @@ export function ManageBookings() {
                     <Clock className="w-6 h-6 text-orange-600 dark:text-orange-400" />
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Upcoming</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Upcoming
+                    </p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {bookings.filter(b => new Date(b.date) >= new Date()).length}
+                      {
+                        bookings.filter((b) => new Date(b.date) >= new Date())
+                          .length
+                      }
                     </p>
                   </div>
                 </div>
@@ -234,9 +256,14 @@ export function ManageBookings() {
                     <CheckCircle className="w-6 h-6 text-green-600 dark:text-green-400" />
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Completed</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Completed
+                    </p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {bookings.filter(b => new Date(b.date) < new Date()).length}
+                      {
+                        bookings.filter((b) => new Date(b.date) < new Date())
+                          .length
+                      }
                     </p>
                   </div>
                 </div>
@@ -250,7 +277,9 @@ export function ManageBookings() {
           <Card>
             <CardContent className="py-16 text-center">
               <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-gray-400" />
-              <p className="text-gray-600 dark:text-gray-400">Loading bookings...</p>
+              <p className="text-gray-600 dark:text-gray-400">
+                Loading bookings...
+              </p>
             </CardContent>
           </Card>
         ) : bookings.length === 0 ? (
@@ -265,7 +294,7 @@ export function ManageBookings() {
               <p className="text-gray-600 dark:text-gray-400 mb-6">
                 Bookings from your websites will appear here
               </p>
-              <Button variant="primary" onClick={() => navigate('/dashboard')}>
+              <Button variant="primary" onClick={() => navigate("/dashboard")}>
                 Back to Dashboard
               </Button>
             </CardContent>
@@ -282,12 +311,15 @@ export function ManageBookings() {
                 {bookings.map((booking) => {
                   const { badge, color } = getBookingStatus(booking.date);
                   const bookingDate = new Date(booking.date);
-                  const formattedDate = bookingDate.toLocaleDateString('en-US', {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  });
+                  const formattedDate = bookingDate.toLocaleDateString(
+                    "en-US",
+                    {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    },
+                  );
 
                   return (
                     <div
@@ -361,7 +393,8 @@ export function ManageBookings() {
                   Delete Booking?
                 </h3>
                 <p className="text-gray-600 dark:text-gray-400 mb-6">
-                  Are you sure you want to delete this booking? This action cannot be undone.
+                  Are you sure you want to delete this booking? This action
+                  cannot be undone.
                 </p>
                 <div className="flex gap-3">
                   <Button
@@ -384,7 +417,7 @@ export function ManageBookings() {
                         Deleting...
                       </>
                     ) : (
-                      'Delete'
+                      "Delete"
                     )}
                   </Button>
                 </div>

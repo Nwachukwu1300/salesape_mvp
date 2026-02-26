@@ -1,25 +1,27 @@
-import { loadStripe, Stripe } from '@stripe/stripe-js';
+import { loadStripe, Stripe } from "@stripe/stripe-js";
 
 let stripePromise: Promise<Stripe | null>;
 
 export const getStripe = () => {
   if (!stripePromise) {
-    stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '');
+    stripePromise = loadStripe(
+      import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "",
+    );
   }
   return stripePromise;
 };
 
 export const PRICING_PLANS = {
   free: {
-    name: 'Free',
+    name: "Free",
     price: 0,
-    interval: 'forever',
+    interval: "forever",
     features: [
-      '1 Website',
-      '10 Leads per month',
-      '2 SEO Audits',
-      'Basic templates',
-      'Email support',
+      "1 Website",
+      "10 Leads per month",
+      "2 SEO Audits",
+      "Basic templates",
+      "Email support",
     ],
     limits: {
       websites: 1,
@@ -28,19 +30,19 @@ export const PRICING_PLANS = {
     },
   },
   pro: {
-    name: 'Pro',
+    name: "Pro",
     price: 29,
-    interval: 'month',
-    stripePriceId: 'price_pro_monthly', // Replace with your Stripe Price ID
+    interval: "month",
+    stripePriceId: "price_pro_monthly", // Replace with your Stripe Price ID
     features: [
-      'Unlimited Websites',
-      'Unlimited Leads',
-      'Unlimited SEO Audits',
-      'Advanced AI customization',
-      'Custom domains',
-      'Priority support',
-      'Remove SalesAPE.ai branding',
-      'Advanced analytics',
+      "Unlimited Websites",
+      "Unlimited Leads",
+      "Unlimited SEO Audits",
+      "Advanced AI customization",
+      "Custom domains",
+      "Priority support",
+      "Remove SalesAPE.ai branding",
+      "Advanced analytics",
     ],
     limits: {
       websites: Infinity,
@@ -49,18 +51,18 @@ export const PRICING_PLANS = {
     },
   },
   enterprise: {
-    name: 'Enterprise',
+    name: "Enterprise",
     price: 99,
-    interval: 'month',
-    stripePriceId: 'price_enterprise_monthly', // Replace with your Stripe Price ID
+    interval: "month",
+    stripePriceId: "price_enterprise_monthly", // Replace with your Stripe Price ID
     features: [
-      'Everything in Pro',
-      'White-label solution',
-      'API access',
-      'Dedicated account manager',
-      'Custom integrations',
-      'SLA guarantee',
-      '24/7 phone support',
+      "Everything in Pro",
+      "White-label solution",
+      "API access",
+      "Dedicated account manager",
+      "Custom integrations",
+      "SLA guarantee",
+      "24/7 phone support",
     ],
     limits: {
       websites: Infinity,

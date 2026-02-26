@@ -5,28 +5,37 @@ interface ProgressCircleProps {
   label?: string;
 }
 
-export function ProgressCircle({ 
-  value, 
-  size = 120, 
+export function ProgressCircle({
+  value,
+  size = 120,
   strokeWidth = 8,
-  label 
+  label,
 }: ProgressCircleProps) {
   const radius = (size - strokeWidth) / 2;
   const circumference = radius * 2 * Math.PI;
   const offset = circumference - (value / 100) * circumference;
-  
+
   const getColor = (score: number) => {
-    if (score >= 90) return '#10b981'; // green
-    if (score >= 50) return '#f59e0b'; // amber
-    return '#ef4444'; // red
+    if (score >= 90) return "#10b981"; // green
+    if (score >= 50) return "#f59e0b"; // amber
+    return "#ef4444"; // red
   };
-  
+
   const color = getColor(value);
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
-        <svg width={size} height={size} className="transform -rotate-90" viewBox={`0 0 ${size} ${size}`} preserveAspectRatio="xMidYMid meet">
+      <div
+        className="relative flex-shrink-0"
+        style={{ width: size, height: size }}
+      >
+        <svg
+          width={size}
+          height={size}
+          className="transform -rotate-90"
+          viewBox={`0 0 ${size} ${size}`}
+          preserveAspectRatio="xMidYMid meet"
+        >
           <circle
             cx={size / 2}
             cy={size / 2}
@@ -46,16 +55,26 @@ export function ProgressCircle({
             strokeDashoffset={offset}
             strokeLinecap="round"
             className="transition-all duration-1000 ease-out will-change-auto"
-            style={{ backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased' }}
+            style={{
+              backfaceVisibility: "hidden",
+              WebkitFontSmoothing: "antialiased",
+            }}
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-2xl font-bold text-center leading-none" style={{ color }}>
+          <span
+            className="text-2xl font-bold text-center leading-none"
+            style={{ color }}
+          >
             {value}
           </span>
         </div>
       </div>
-      {label && <span className="text-sm font-medium text-gray-700 text-center">{label}</span>}
+      {label && (
+        <span className="text-sm font-medium text-gray-700 text-center">
+          {label}
+        </span>
+      )}
     </div>
   );
 }

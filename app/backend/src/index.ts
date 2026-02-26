@@ -37,6 +37,8 @@ import { startContentIngestionWorker } from './workers/content-ingestion.worker.
 import { startRepurposingWorker } from './workers/repurposing.worker.js';
 import { startDistributionWorker } from './workers/distribution.worker.js';
 import authRouter from './routes/auth.js';
+import apeChatRouter from './routes/apeChat.js';
+import settingsRouter from './routes/settings.js';
 
 // Import Phase 2B services
 import {
@@ -249,6 +251,8 @@ app.use(globalLimiter); // Global rate limiting
 
 // Register auth routes
 app.use(authRouter);
+app.use('/api/ape', apeChatRouter);
+app.use('/api/settings', settingsRouter);
 
 // Start website generation worker (if Redis available) — ensure Redis is ready first
 async function initWorkers() {

@@ -28,6 +28,6 @@ module.exports = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
-  testTimeout: 10000,
+  testTimeout: 120000, // 120 seconds for integration tests with real API calls
   verbose: true,
 };

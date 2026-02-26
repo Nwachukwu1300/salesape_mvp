@@ -46,7 +46,7 @@ function Button({
     asChild?: boolean;
     as?: React.ElementType | string;
   }) {
-  const Comp = asChild ? Slot : (as || "button");
+  const Comp = asChild ? Slot : as || "button";
 
   return (
     <Comp

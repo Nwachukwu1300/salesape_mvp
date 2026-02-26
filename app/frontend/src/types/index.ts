@@ -2,4 +2,4 @@
  * Type exports
  */
 
-export * from './website-config';
+export * from "./website-config";

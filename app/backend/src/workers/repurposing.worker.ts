@@ -61,7 +61,7 @@ Tag someone who needs to see this! 😂
   };
 
   const script = scripts[style] || scripts.educational;
-  if (!script) throw new Error('No script template found');
+  if (typeof script !== 'function') throw new Error('No script template found');
   return script(excerpt);
 }
 
@@ -113,7 +113,7 @@ ${text}
   };
 
   const template = templates[style] || templates.educational;
-  if (!template) throw new Error('No template found');
+  if (typeof template !== 'function') throw new Error('No template found');
   return template(excerpt);
 }
 
@@ -179,7 +179,7 @@ ${text}
   };
 
   const format = formats[style] || formats.educational;
-  if (!format) throw new Error('No format template found');
+  if (typeof format !== 'function') throw new Error('No format template found');
   return format(excerpt);
 }
 
@@ -454,7 +454,8 @@ async function processRepurposing(job: Job<RepurposingJob>) {
     const storagePaths: Record<string, string> = {};
     for (const [format, variantContent] of Object.entries(variants)) {
       const fileName = `repurposing/${contentId}/${format}-${Date.now()}.txt`;
-      await storageService.uploadFile('ASSETS', fileName, variantContent, {
+      const BucketName = 'ASSETS' as const;
+      await storageService.uploadFile(BucketName, fileName, variantContent, {
         contentType: 'text/plain',
         metadata: {
           contentId,

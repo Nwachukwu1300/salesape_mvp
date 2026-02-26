@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Loader } from 'lucide-react';
-import { Card } from '../components/Card';
-import { Button } from '../components/Button';
-import { startConversation } from '../lib/api';
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { Loader } from "lucide-react";
+import { Card } from "../components/Card";
+import { Button } from "../components/Button";
+import { startConversation } from "../lib/api";
+import { useAuth } from "../contexts/AuthContext";
 
 interface ConversationState {
   sessionId: string;
@@ -17,38 +18,52 @@ interface ConversationState {
 
 export const ConversationUI: React.FC = () => {
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const initConversation = async () => {
+      if (authLoading) return; // wait for auth to hydrate
+      if (!user) {
+        // not signed in
+        navigate('/login');
+        return;
+      }
       try {
         setLoading(true);
         const response = await startConversation();
-        
+
+        // Prepare an introductory message from the conversation AI (APE)
+        const intro = `Hi — I'm APE, your SalesApe assistant. I'll ask a few questions to understand your business and generate a website tailored to your needs.`;
+
         // Save conversation state to sessionStorage for persistence
         const conversationState: ConversationState = {
           sessionId: response.sessionId,
           stage: response.stage,
-          currentQuestion: response.messages[0]?.content || '',
+          currentQuestion: (response.messages[0]?.content
+            ? intro + "\n\n" + response.messages[0].content
+            : intro),
           extracted: {},
           isComplete: false,
           questionNumber: 1,
           totalQuestions: 12,
         };
-        
+
         sessionStorage.setItem(
           `conv_${response.sessionId}`,
-          JSON.stringify(conversationState)
+          JSON.stringify(conversationState),
         );
-        
+
         setError(null);
-        
+
         // Navigate to the first question page
         navigate(`/conversation/${response.sessionId}/question`);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to start conversation');
-        console.error('Conversation init error', err);
+        setError(
+          err instanceof Error ? err.message : "Failed to start conversation",
+        );
+        console.error("Conversation init error", err);
       } finally {
         setLoading(false);
       }
@@ -76,7 +91,9 @@ export const ConversationUI: React.FC = () => {
     <div className="min-h-screen bg-white dark:bg-gray-950 flex items-center justify-center p-4">
       <div className="text-center">
         <Loader className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
-        <p className="text-gray-600 dark:text-gray-400">Starting conversation...</p>
+        <p className="text-gray-600 dark:text-gray-400">
+          Starting conversation...
+        </p>
       </div>
     </div>
   );

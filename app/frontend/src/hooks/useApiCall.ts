@@ -3,8 +3,8 @@
  * Handles API calls with automatic error notifications and loading states
  */
 
-import { useState, useCallback } from 'react';
-import { toast } from 'sonner';
+import { useState, useCallback } from "react";
+import { toast } from "sonner";
 
 export interface ApiCallOptions {
   onSuccess?: (data: any) => void;
@@ -19,19 +19,16 @@ export function useApiCall() {
   const [error, setError] = useState<Error | null>(null);
 
   const execute = useCallback(
-    async (
-      apiFunction: () => Promise<any>,
-      options?: ApiCallOptions
-    ) => {
+    async (apiFunction: () => Promise<any>, options?: ApiCallOptions) => {
       setLoading(true);
       setError(null);
 
       try {
         const data = await apiFunction();
-        
+
         if (options?.showSuccessToast) {
-          toast.success(options.successMessage || 'Success!', {
-            description: 'Operation completed successfully',
+          toast.success(options.successMessage || "Success!", {
+            description: "Operation completed successfully",
           });
         }
 
@@ -41,8 +38,8 @@ export function useApiCall() {
         const error = err instanceof Error ? err : new Error(String(err));
         setError(error);
 
-        toast.error(options?.errorMessage || 'An error occurred', {
-          description: error.message || 'Please try again later',
+        toast.error(options?.errorMessage || "An error occurred", {
+          description: error.message || "Please try again later",
         });
 
         options?.onError?.(error);
@@ -51,7 +48,7 @@ export function useApiCall() {
         setLoading(false);
       }
     },
-    []
+    [],
   );
 
   return {
@@ -75,7 +72,7 @@ export function useFetch<T = any>(
     onSuccess?: (data: T) => void;
     onError?: (error: Error) => void;
     dependencies?: any[];
-  }
+  },
 ) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
@@ -90,7 +87,7 @@ export function useFetch<T = any>(
     try {
       const response = await window.fetch(url);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
+
       const result = await response.json();
       setData(result);
       options?.onSuccess?.(result);

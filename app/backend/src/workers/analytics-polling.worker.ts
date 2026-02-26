@@ -18,6 +18,7 @@ import { Worker, Job } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import axios from 'axios';
 import type { AnalyticsPollingJob } from '../queues/index.js';
+import { getRedisClient, createRedisClient } from '../utils/redis-client.js';
 
 const prisma = new PrismaClient();
 

@@ -1,11 +1,11 @@
-import { Crown, TrendingUp, Sparkles } from 'lucide-react';
-import { Button } from './Button';
-import { Card, CardContent } from './Card';
-import { useSubscription } from '../contexts/SubscriptionContext';
-import { PRICING_PLANS } from '../lib/stripe';
+import { Crown, TrendingUp, Sparkles } from "lucide-react";
+import { Button } from "./Button";
+import { Card, CardContent } from "./Card";
+import { useSubscription } from "../contexts/SubscriptionContext";
+import { PRICING_PLANS } from "../lib/stripe";
 
 interface UpgradePromptProps {
-  feature: 'website' | 'leads' | 'seoAudit';
+  feature: "website" | "leads" | "seoAudit";
   onUpgrade: () => void;
 }
 
@@ -14,18 +14,21 @@ export function UpgradePrompt({ feature, onUpgrade }: UpgradePromptProps) {
 
   const messages = {
     website: {
-      title: '🚀 Create Unlimited Websites',
-      description: 'Upgrade to Pro to create unlimited AI-powered websites for all your clients and projects.',
+      title: "🚀 Create Unlimited Websites",
+      description:
+        "Upgrade to Pro to create unlimited AI-powered websites for all your clients and projects.",
       stat: `${usage.websites} / ${PRICING_PLANS[currentPlan].limits.websites} websites used`,
     },
     leads: {
-      title: '📈 Capture Unlimited Leads',
-      description: 'Never miss a potential customer. Upgrade to Pro for unlimited lead capture and management.',
+      title: "📈 Capture Unlimited Leads",
+      description:
+        "Never miss a potential customer. Upgrade to Pro for unlimited lead capture and management.",
       stat: `${usage.leads} / ${PRICING_PLANS[currentPlan].limits.leads} leads this month`,
     },
     seoAudit: {
-      title: '🔍 Unlimited SEO Audits',
-      description: 'Run unlimited SEO audits to optimize all your websites and boost search rankings.',
+      title: "🔍 Unlimited SEO Audits",
+      description:
+        "Run unlimited SEO audits to optimize all your websites and boost search rankings.",
       stat: `${usage.seoAudits} / ${PRICING_PLANS[currentPlan].limits.seoAudits} audits used`,
     },
   };
@@ -33,10 +36,13 @@ export function UpgradePrompt({ feature, onUpgrade }: UpgradePromptProps) {
   const message = messages[feature];
 
   return (
-    <Card className="border-2" style={{ borderColor: '#f724de' }}>
+    <Card className="border-2" style={{ borderColor: "#f724de" }}>
       <CardContent className="p-8">
         <div className="flex items-start gap-6">
-          <div className="p-4 rounded-xl" style={{ backgroundColor: '#f724de' }}>
+          <div
+            className="p-4 rounded-xl"
+            style={{ backgroundColor: "#f724de" }}
+          >
             <Crown className="w-8 h-8 text-white" />
           </div>
           <div className="flex-1">
@@ -51,8 +57,8 @@ export function UpgradePrompt({ feature, onUpgrade }: UpgradePromptProps) {
                 <div
                   className="h-full transition-all duration-300"
                   style={{
-                    width: `${Math.min((usage[feature === 'website' ? 'websites' : feature === 'leads' ? 'leads' : 'seoAudits'] / PRICING_PLANS[currentPlan].limits[feature === 'website' ? 'websites' : feature === 'leads' ? 'leads' : 'seoAudits']) * 100, 100)}%`,
-                    backgroundColor: '#f724de',
+                    width: `${Math.min((usage[feature === "website" ? "websites" : feature === "leads" ? "leads" : "seoAudits"] / PRICING_PLANS[currentPlan].limits[feature === "website" ? "websites" : feature === "leads" ? "leads" : "seoAudits"]) * 100, 100)}%`,
+                    backgroundColor: "#f724de",
                   }}
                 />
               </div>

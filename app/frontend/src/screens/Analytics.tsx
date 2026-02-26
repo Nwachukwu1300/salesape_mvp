@@ -1,8 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardContent } from '../components/Card';
-import { Badge } from '../components/Badge';
-import { TrendingUp, Eye, Users, CheckCircle, ExternalLink, BookOpen, Award } from 'lucide-react';
-import { SidebarNav } from '../components/SidebarNav';
+import React, { useState, useEffect } from "react";
+import { getAccessToken } from "../lib/supabase";
+import { Card, CardHeader, CardContent } from "../components/Card";
+import { Badge } from "../components/Badge";
+import {
+  TrendingUp,
+  Eye,
+  Users,
+  CheckCircle,
+  ExternalLink,
+  BookOpen,
+  Award,
+} from "lucide-react";
+import { SidebarNav } from "../components/SidebarNav";
 
 interface AnalyticsMetric {
   value: number | string;
@@ -51,11 +60,11 @@ function AnalyticsContent() {
   const fetchWebsites = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('supabase.auth.token');
+      const token = getAccessToken();
       if (!token) return;
 
-      const response = await fetch('http://localhost:3001/businesses', {
-        headers: { 'Authorization': `Bearer ${token}` },
+      const response = await fetch("http://localhost:3001/businesses", {
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (response.ok) {
@@ -66,7 +75,7 @@ function AnalyticsContent() {
         }
       }
     } catch (error) {
-      console.error('Failed to fetch websites:', error);
+      console.error("Failed to fetch websites:", error);
     } finally {
       setLoading(false);
     }
@@ -74,10 +83,13 @@ function AnalyticsContent() {
 
   const fetchAnalytics = async (websiteId: string) => {
     try {
-      const token = localStorage.getItem('supabase.auth.token');
-      const response = await fetch(`http://localhost:3001/businesses/${websiteId}/analytics`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
+      const token = getAccessToken();
+      const response = await fetch(
+        `http://localhost:3001/businesses/${websiteId}/analytics`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
 
       if (response.ok) {
         const data = await response.json();
@@ -85,28 +97,28 @@ function AnalyticsContent() {
       } else {
         // Set default empty analytics
         setAnalytics({
-          engagementRate: { value: '0%', trend: 0 },
-          completionRate: { value: '0%', trend: 0 },
-          viewVelocity: { value: '0', unit: 'views/day', trend: 0 },
-          ctr: { value: '0%', trend: 0 },
-          conversionSignals: { value: '0', trend: 0 },
-          aiCitationFrequency: { value: '0%', trend: 0 },
-          seoImpactTrend: { value: 'Neutral', trend: 0 },
-          aeoImpactTrend: { value: 'Neutral', trend: 0 },
+          engagementRate: { value: "0%", trend: 0 },
+          completionRate: { value: "0%", trend: 0 },
+          viewVelocity: { value: "0", unit: "views/day", trend: 0 },
+          ctr: { value: "0%", trend: 0 },
+          conversionSignals: { value: "0", trend: 0 },
+          aiCitationFrequency: { value: "0%", trend: 0 },
+          seoImpactTrend: { value: "Neutral", trend: 0 },
+          aeoImpactTrend: { value: "Neutral", trend: 0 },
         });
       }
     } catch (error) {
-      console.error('Failed to fetch analytics:', error);
+      console.error("Failed to fetch analytics:", error);
       // Set default empty analytics on error
       setAnalytics({
-        engagementRate: { value: '0%', trend: 0 },
-        completionRate: { value: '0%', trend: 0 },
-        viewVelocity: { value: '0', unit: 'views/day', trend: 0 },
-        ctr: { value: '0%', trend: 0 },
-        conversionSignals: { value: '0', trend: 0 },
-        aiCitationFrequency: { value: '0%', trend: 0 },
-        seoImpactTrend: { value: 'Neutral', trend: 0 },
-        aeoImpactTrend: { value: 'Neutral', trend: 0 },
+        engagementRate: { value: "0%", trend: 0 },
+        completionRate: { value: "0%", trend: 0 },
+        viewVelocity: { value: "0", unit: "views/day", trend: 0 },
+        ctr: { value: "0%", trend: 0 },
+        conversionSignals: { value: "0", trend: 0 },
+        aiCitationFrequency: { value: "0%", trend: 0 },
+        seoImpactTrend: { value: "Neutral", trend: 0 },
+        aeoImpactTrend: { value: "Neutral", trend: 0 },
       });
     }
   };
@@ -115,7 +127,9 @@ function AnalyticsContent() {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <p className="text-gray-500 dark:text-gray-400">Loading analytics...</p>
+          <p className="text-gray-500 dark:text-gray-400">
+            Loading analytics...
+          </p>
         </div>
       </div>
     );
@@ -142,8 +156,8 @@ function AnalyticsContent() {
                   onClick={() => setSelectedWebsite(site.id)}
                   className={`px-4 py-2 rounded-lg font-medium transition-all ${
                     selectedWebsite === site.id
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      ? "bg-blue-600 text-white"
+                      : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700"
                   }`}
                 >
                   {site.name}
@@ -175,13 +189,13 @@ function AnalyticsContent() {
                       <Badge
                         variant={
                           analytics.engagementRate.trend > 0
-                            ? 'success'
+                            ? "success"
                             : analytics.engagementRate.trend < 0
-                            ? 'error'
-                            : 'default'
+                              ? "error"
+                              : "default"
                         }
                       >
-                        {analytics.engagementRate.trend > 0 ? '+' : ''}
+                        {analytics.engagementRate.trend > 0 ? "+" : ""}
                         {analytics.engagementRate.trend}%
                       </Badge>
                     )}
@@ -209,13 +223,13 @@ function AnalyticsContent() {
                       <Badge
                         variant={
                           analytics.completionRate.trend > 0
-                            ? 'success'
+                            ? "success"
                             : analytics.completionRate.trend < 0
-                            ? 'error'
-                            : 'default'
+                              ? "error"
+                              : "default"
                         }
                       >
-                        {analytics.completionRate.trend > 0 ? '+' : ''}
+                        {analytics.completionRate.trend > 0 ? "+" : ""}
                         {analytics.completionRate.trend}%
                       </Badge>
                     )}
@@ -349,7 +363,11 @@ function AnalyticsContent() {
             <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50">
               <CardContent className="pt-6">
                 <p className="text-sm text-blue-900 dark:text-blue-200">
-                  <strong>Note:</strong> Ranking metrics do not guarantee virality. Analytics are pulled from stored snapshots and updated periodically. Use these insights to inform your content strategy, but remember that organic growth depends on many factors beyond metrics.
+                  <strong>Note:</strong> Ranking metrics do not guarantee
+                  virality. Analytics are pulled from stored snapshots and
+                  updated periodically. Use these insights to inform your
+                  content strategy, but remember that organic growth depends on
+                  many factors beyond metrics.
                 </p>
               </CardContent>
             </Card>

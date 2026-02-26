@@ -75,7 +75,7 @@ export interface ContactConfig {
 export interface BookingConfig {
   title: string;
   subtitle?: string;
-  provider: 'internal' | 'google' | 'calendly';
+  provider: "internal" | "google" | "calendly";
   calendarId?: string;
   availableSlots?: boolean;
 }
@@ -114,7 +114,12 @@ export interface GalleryConfig {
 export interface PricingTableConfig {
   title: string;
   subtitle?: string;
-  items: { name: string; price: string; description?: string; features?: string[] }[];
+  items: {
+    name: string;
+    price: string;
+    description?: string;
+    features?: string[];
+  }[];
 }
 
 export interface WebsiteConfig {
@@ -145,26 +150,31 @@ export interface WebsiteTemplate {
   name: string;
   description: string;
   layout: {
-    heroStyle: 'image-left' | 'image-full' | 'centered';
-    servicesLayout: 'grid' | 'list';
-    typography: 'modern' | 'classic' | 'luxury';
+    heroStyle: "image-left" | "image-full" | "centered";
+    servicesLayout: "grid" | "list";
+    typography: "modern" | "classic" | "luxury";
   };
   defaultSections: string[];
   stylingRules: {
-    spacing: 'compact' | 'comfortable' | 'spacious';
+    spacing: "compact" | "comfortable" | "spacious";
     imageRadius: number;
-    shadowIntensity: 'none' | 'light' | 'medium' | 'heavy';
-    borderStyle: 'none' | 'subtle' | 'bold';
+    shadowIntensity: "none" | "light" | "medium" | "heavy";
+    borderStyle: "none" | "subtle" | "bold";
   };
 }
 
-export type GenerationStatus = 'idle' | 'queued' | 'processing' | 'completed' | 'failed';
+export type GenerationStatus =
+  | "idle"
+  | "queued"
+  | "processing"
+  | "completed"
+  | "failed";
 export type GenerationStep =
-  | 'queued'
-  | 'scraping'
-  | 'analyzing'
-  | 'selecting_template'
-  | 'generating_config'
-  | 'enriching_images'
-  | 'completed'
-  | 'failed';
+  | "queued"
+  | "scraping"
+  | "analyzing"
+  | "selecting_template"
+  | "generating_config"
+  | "enriching_images"
+  | "completed"
+  | "failed";

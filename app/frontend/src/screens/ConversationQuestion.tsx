@@ -1,10 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Send, ArrowLeft, Loader, Mic, MicOff, Volume2, VolumeX, CheckCircle } from 'lucide-react';
-import { Button } from '../components/Button';
-import { Input } from '../components/Input';
-import { SidebarNav } from '../components/SidebarNav';
-import { sendConversationMessage, completeConversation, generateWebsiteConfig } from '../lib/api';
+import React, { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import {
+  Send,
+  ArrowLeft,
+  Loader,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  CheckCircle,
+} from "lucide-react";
+import { Button } from "../components/Button";
+import { Input } from "../components/Input";
+import { SidebarNav } from "../components/SidebarNav";
+import {
+  sendConversationMessage,
+  completeConversation,
+  generateWebsiteConfig,
+} from "../lib/api";
 
 interface ConversationState {
   sessionId: string;
@@ -19,17 +32,17 @@ interface ConversationState {
 export const ConversationQuestion: React.FC = () => {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
-  
+
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
   const [state, setstate] = useState<ConversationState | null>(null);
-  const [userInput, setUserInput] = useState('');
+  const [userInput, setUserInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Voice feature states
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -39,14 +52,16 @@ export const ConversationQuestion: React.FC = () => {
 
   // Initialize voice recognition and synthesis
   useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
     if (SpeechRecognition) {
       setVoiceSupported(true);
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'en-US';
+      recognitionRef.current.lang = "en-US";
 
       recognitionRef.current.onstart = () => {
         setIsListening(true);
@@ -54,7 +69,7 @@ export const ConversationQuestion: React.FC = () => {
       };
 
       recognitionRef.current.onresult = (event: any) => {
-        let transcript = '';
+        let transcript = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
           transcript += event.results[i][0].transcript;
         }
@@ -79,7 +94,7 @@ export const ConversationQuestion: React.FC = () => {
 
   const startListening = () => {
     if (recognitionRef.current && !isListening) {
-      setUserInput('');
+      setUserInput("");
       recognitionRef.current.start();
     }
   };
@@ -109,7 +124,7 @@ export const ConversationQuestion: React.FC = () => {
   // Load conversation state
   useEffect(() => {
     if (!sessionId) {
-      setError('No session ID provided');
+      setError("No session ID provided");
       setLoading(false);
       return;
     }
@@ -119,19 +134,19 @@ export const ConversationQuestion: React.FC = () => {
       try {
         const state = JSON.parse(savedState);
         setstate(state);
-        
+
         // Speak the question if voice output enabled
         if (enableVoiceOutput) {
           speakMessage(state.currentQuestion);
         }
-        
+
         setLoading(false);
       } catch (err) {
-        setError('Failed to load conversation state');
+        setError("Failed to load conversation state");
         setLoading(false);
       }
     } else {
-      setError('Conversation session not found');
+      setError("Conversation session not found");
       setLoading(false);
     }
   }, [sessionId, enableVoiceOutput]);
@@ -144,19 +159,22 @@ export const ConversationQuestion: React.FC = () => {
     setError(null);
 
     try {
-      const response = await sendConversationMessage(state.sessionId, userInput);
-      
+      const response = await sendConversationMessage(
+        state.sessionId,
+        userInput,
+      );
+
       if (response.isComplete) {
-        setstate(prev => prev ? { ...prev, isComplete: true } : null);
+        setstate((prev) => (prev ? { ...prev, isComplete: true } : null));
         setGenerating(true);
-        
+
         // Show "Generating" screen for 2 seconds
         setTimeout(async () => {
           try {
             const config = await generateWebsiteConfig(state.sessionId);
-            navigate('/dashboard', { state: { websiteConfig: config } });
+            navigate("/dashboard", { state: { websiteConfig: config } });
           } catch (err) {
-            setError('Failed to generate website config');
+            setError("Failed to generate website config");
             setGenerating(false);
           }
         }, 2000);
@@ -164,26 +182,30 @@ export const ConversationQuestion: React.FC = () => {
         const newState: ConversationState = {
           sessionId: response.sessionId,
           stage: response.stage,
-          currentQuestion: response.messages[response.messages.length - 1]?.content || '',
+          currentQuestion:
+            response.messages[response.messages.length - 1]?.content || "",
           extracted: response.extracted || state.extracted,
           isComplete: false,
           questionNumber: state.questionNumber + 1,
           totalQuestions: state.totalQuestions,
         };
-        
+
         setstate(newState);
-        sessionStorage.setItem(`conv_${state.sessionId}`, JSON.stringify(newState));
-        setUserInput('');
-        
+        sessionStorage.setItem(
+          `conv_${state.sessionId}`,
+          JSON.stringify(newState),
+        );
+        setUserInput("");
+
         // Speak the new question
         if (enableVoiceOutput) {
           speakMessage(newState.currentQuestion);
         }
-        
+
         setTimeout(() => inputRef.current?.focus(), 100);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send message');
+      setError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
       setSending(false);
     }
@@ -198,8 +220,12 @@ export const ConversationQuestion: React.FC = () => {
       <div className="min-h-screen bg-white dark:bg-gray-950 flex items-center justify-center p-4">
         <div className="text-center">
           <Loader className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600 dark:text-gray-400 mb-2">Generating your website...</p>
-          <p className="text-sm text-gray-500 dark:text-gray-500">This may take a moment</p>
+          <p className="text-gray-600 dark:text-gray-400 mb-2">
+            Generating your website...
+          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-500">
+            This may take a moment
+          </p>
         </div>
       </div>
     );
@@ -210,7 +236,9 @@ export const ConversationQuestion: React.FC = () => {
       <div className="min-h-screen bg-white dark:bg-gray-950 flex items-center justify-center p-4">
         <div className="text-center">
           <Loader className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600 dark:text-gray-400">Loading question...</p>
+          <p className="text-gray-600 dark:text-gray-400">
+            Loading question...
+          </p>
         </div>
       </div>
     );
@@ -221,7 +249,7 @@ export const ConversationQuestion: React.FC = () => {
       <div className="min-h-screen bg-white dark:bg-gray-950 flex items-center justify-center p-4">
         <div className="text-center space-y-4">
           <p className="text-lg text-red-600 dark:text-red-400">{error}</p>
-          <Button onClick={() => navigate('/')} variant="outline">
+          <Button onClick={() => navigate("/")} variant="outline">
             Start Over
           </Button>
         </div>
@@ -241,7 +269,7 @@ export const ConversationQuestion: React.FC = () => {
         >
           <ArrowLeft className="w-5 h-5 text-gray-700 dark:text-gray-300" />
         </button>
-        
+
         <div className="flex-1 text-center mx-4">
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
             Question {state.questionNumber} of {state.totalQuestions}
@@ -249,7 +277,9 @@ export const ConversationQuestion: React.FC = () => {
           <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
             <div
               className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${(state.questionNumber / state.totalQuestions) * 100}%` }}
+              style={{
+                width: `${(state.questionNumber / state.totalQuestions) * 100}%`,
+              }}
             />
           </div>
         </div>
@@ -262,13 +292,19 @@ export const ConversationQuestion: React.FC = () => {
           <div className="space-y-4">
             {/* First line - greeting (smaller) */}
             <p className="text-base sm:text-lg md:text-xl font-medium text-gray-700 dark:text-gray-300">
-              {state.currentQuestion.split('\n')[0]}
+              {state.currentQuestion.split("\n")[0]}
             </p>
-            
+
             {/* Main question (larger) */}
-            {state.currentQuestion.includes('\n') && (
+            {state.currentQuestion.includes("\n") && (
               <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 dark:text-white leading-tight">
-                {state.currentQuestion.split('\n').slice(1).join('\n').split('\n')[0]}
+                {
+                  state.currentQuestion
+                    .split("\n")
+                    .slice(1)
+                    .join("\n")
+                    .split("\n")[0]
+                }
               </h1>
             )}
           </div>
@@ -277,7 +313,9 @@ export const ConversationQuestion: React.FC = () => {
           {Object.keys(state.extracted).length > 0 && (
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
               <p className="text-sm text-blue-900 dark:text-blue-300">
-                ✓ {Object.keys(state.extracted).length} field{Object.keys(state.extracted).length !== 1 ? 's' : ''} captured so far
+                ✓ {Object.keys(state.extracted).length} field
+                {Object.keys(state.extracted).length !== 1 ? "s" : ""} captured
+                so far
               </p>
             </div>
           )}
@@ -301,8 +339,8 @@ export const ConversationQuestion: React.FC = () => {
               onClick={() => setEnableVoiceInput(!enableVoiceInput)}
               className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors text-xs font-medium ${
                 enableVoiceInput
-                  ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                  ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
               }`}
               title="Toggle voice input"
             >
@@ -323,8 +361,8 @@ export const ConversationQuestion: React.FC = () => {
               onClick={() => setEnableVoiceOutput(!enableVoiceOutput)}
               className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors text-xs font-medium ${
                 enableVoiceOutput
-                  ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                  ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
               }`}
               title="Toggle voice output"
             >
@@ -344,13 +382,18 @@ export const ConversationQuestion: React.FC = () => {
         )}
 
         {/* Input Form */}
-        <form onSubmit={handleSendMessage} className="flex flex-col sm:flex-row gap-2 w-full">
+        <form
+          onSubmit={handleSendMessage}
+          className="flex flex-col sm:flex-row gap-2 w-full"
+        >
           <Input
             ref={inputRef}
             type="text"
             value={userInput}
             onChange={(e) => setUserInput(e.target.value)}
-            placeholder={isListening ? '🎤 Listening...' : 'Type or speak your answer...'}
+            placeholder={
+              isListening ? "🎤 Listening..." : "Type or speak your answer..."
+            }
             disabled={sending}
             className="flex-1 text-sm w-full sm:w-auto"
             autoComplete="off"
@@ -362,10 +405,12 @@ export const ConversationQuestion: React.FC = () => {
                 type="button"
                 onClick={isListening ? stopListening : startListening}
                 disabled={sending}
-                className={`px-3 py-2 flex-shrink-0 ${isListening ? 'bg-red-600 hover:bg-red-700' : ''}`}
-                title={isListening ? 'Stop listening' : 'Start voice input'}
+                className={`px-3 py-2 flex-shrink-0 ${isListening ? "bg-red-600 hover:bg-red-700" : ""}`}
+                title={isListening ? "Stop listening" : "Start voice input"}
               >
-                <Mic className={`w-4 h-4 ${isListening ? 'animate-pulse' : ''}`} />
+                <Mic
+                  className={`w-4 h-4 ${isListening ? "animate-pulse" : ""}`}
+                />
               </Button>
             )}
             <Button
@@ -385,7 +430,7 @@ export const ConversationQuestion: React.FC = () => {
         </form>
 
         <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2">
-          {isSpeaking ? '🔊 AI is speaking...' : 'Powered by SalesAPE AI'}
+          {isSpeaking ? "🔊 AI is speaking..." : "Powered by SalesAPE AI"}
         </p>
       </div>
     </div>

@@ -3,10 +3,10 @@
  * Content approval workflow interface
  */
 
-import React, { useState, useEffect } from 'react';
-import { Card } from './Card';
-import { Button } from './Button';
-import { Loading } from './Loading';
+import React, { useState, useEffect } from "react";
+import { Card } from "./Card";
+import { Button } from "./Button";
+import { Loading } from "./Loading";
 
 interface ApprovalContent {
   id: string;
@@ -17,12 +17,14 @@ interface ApprovalContent {
   createdAt: string;
 }
 
-export const ApprovalQueue: React.FC<{ businessId: string }> = ({ businessId }) => {
+export const ApprovalQueue: React.FC<{ businessId: string }> = ({
+  businessId,
+}) => {
   const [queue, setQueue] = useState<ApprovalContent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [comment, setComment] = useState('');
+  const [comment, setComment] = useState("");
 
   useEffect(() => {
     fetchQueue();
@@ -31,18 +33,21 @@ export const ApprovalQueue: React.FC<{ businessId: string }> = ({ businessId }) 
   const fetchQueue = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/businesses/${businessId}/approval-queue`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+      const response = await fetch(
+        `/api/businesses/${businessId}/approval-queue`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
         },
-      });
+      );
 
-      if (!response.ok) throw new Error('Failed to fetch approval queue');
+      if (!response.ok) throw new Error("Failed to fetch approval queue");
 
       const result = await response.json();
       setQueue(result.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
@@ -53,22 +58,22 @@ export const ApprovalQueue: React.FC<{ businessId: string }> = ({ businessId }) 
       const response = await fetch(
         `/api/businesses/${businessId}/repurposed-content/${id}/approve`,
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({ comment }),
-        }
+        },
       );
 
-      if (!response.ok) throw new Error('Failed to approve content');
+      if (!response.ok) throw new Error("Failed to approve content");
 
       setQueue(queue.filter((item) => item.id !== id));
       setSelectedId(null);
-      setComment('');
+      setComment("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to approve');
+      setError(err instanceof Error ? err.message : "Failed to approve");
     }
   };
 
@@ -77,25 +82,26 @@ export const ApprovalQueue: React.FC<{ businessId: string }> = ({ businessId }) 
       const response = await fetch(
         `/api/businesses/${businessId}/repurposed-content/${id}/reject`,
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({ reason }),
-        }
+        },
       );
 
-      if (!response.ok) throw new Error('Failed to reject content');
+      if (!response.ok) throw new Error("Failed to reject content");
 
       setQueue(queue.filter((item) => item.id !== id));
       setSelectedId(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reject');
+      setError(err instanceof Error ? err.message : "Failed to reject");
     }
   };
 
-  if (loading) return <Loading isLoading={true} message="Loading approval queue..." />;
+  if (loading)
+    return <Loading isLoading={true} message="Loading approval queue..." />;
   if (error) return <div className="text-red-600">Error: {error}</div>;
 
   return (
@@ -118,9 +124,11 @@ export const ApprovalQueue: React.FC<{ businessId: string }> = ({ businessId }) 
               key={item.id}
               item={item}
               selected={selectedId === item.id}
-              onSelect={() => setSelectedId(selectedId === item.id ? null : item.id)}
+              onSelect={() =>
+                setSelectedId(selectedId === item.id ? null : item.id)
+              }
               onApprove={() => handleApprove(item.id)}
-              onReject={() => handleReject(item.id, 'Does not meet standards')}
+              onReject={() => handleReject(item.id, "Does not meet standards")}
               comment={comment}
               onCommentChange={setComment}
             />
@@ -141,27 +149,35 @@ const ApprovalCard: React.FC<{
   onReject: () => void;
   comment: string;
   onCommentChange: (comment: string) => void;
-}> = ({ item, selected, onSelect, onApprove, onReject, comment, onCommentChange }) => (
+}> = ({
+  item,
+  selected,
+  onSelect,
+  onApprove,
+  onReject,
+  comment,
+  onCommentChange,
+}) => (
   <div
     className="cursor-pointer"
     onClick={onSelect}
     role="button"
     tabIndex={0}
     onKeyDown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
+      if (e.key === "Enter" || e.key === " ") {
         onSelect();
       }
     }}
   >
     <Card
-      className={`p-6 transition ${
-        selected ? 'border-2 border-blue-500' : ''
-      }`}
+      className={`p-6 transition ${selected ? "border-2 border-blue-500" : ""}`}
     >
       <div className="flex justify-between items-start mb-4">
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <span className="font-semibold capitalize text-blue-600">{item.platform}</span>
+            <span className="font-semibold capitalize text-blue-600">
+              {item.platform}
+            </span>
             <span className="text-xs bg-yellow-100 dark:bg-yellow-900 text-yellow-900 dark:text-yellow-100 px-2 py-1 rounded">
               {item.status}
             </span>
@@ -179,7 +195,9 @@ const ApprovalCard: React.FC<{
       {selected && (
         <div className="mt-4 space-y-4 border-t pt-4">
           <div>
-            <label className="block text-sm font-medium mb-2">Comment (optional)</label>
+            <label className="block text-sm font-medium mb-2">
+              Comment (optional)
+            </label>
             <textarea
               value={comment}
               onChange={(e) => onCommentChange(e.target.value)}
@@ -216,11 +234,14 @@ const ApprovalStats: React.FC<{ businessId: string }> = ({ businessId }) => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const response = await fetch(`/api/businesses/${businessId}/approval-stats`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        const response = await fetch(
+          `/api/businesses/${businessId}/approval-stats`,
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
           },
-        });
+        );
         const result = await response.json();
         setStats(result.data);
       } finally {
@@ -241,7 +262,10 @@ const ApprovalStats: React.FC<{ businessId: string }> = ({ businessId }) => {
         <StatItem label="Draft" value={stats.draft} />
         <StatItem label="Approved" value={stats.approved} />
         <StatItem label="Published" value={stats.published} />
-        <StatItem label="Approval Rate" value={`${stats.approvalRate.toFixed(1)}%`} />
+        <StatItem
+          label="Approval Rate"
+          value={`${stats.approvalRate.toFixed(1)}%`}
+        />
       </div>
     </Card>
   );
@@ -253,7 +277,7 @@ const StatItem: React.FC<{ label: string; value: string | number }> = ({
 }) => (
   <div className="text-center">
     <p className="text-2xl font-bold text-blue-600">
-      {typeof value === 'number' ? value : value}
+      {typeof value === "number" ? value : value}
     </p>
     <p className="text-sm text-gray-600 dark:text-gray-400">{label}</p>
   </div>

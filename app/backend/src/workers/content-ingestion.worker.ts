@@ -145,7 +145,7 @@ function extractMetadataFromHtml(html: string): any {
 
   // Extract publish date
   const dateMatch = html.match(/<meta\s+(?:name="publish-date"|property="article:published_time")\s+content="([^"]+)"/i);
-  if (dateMatch && dateMatch[1]) {
+  if (dateMatch?.[1]) {
     const dateStr = dateMatch[1].trim();
     const date = new Date(dateStr);
     if (!isNaN(date.getTime())) {
@@ -223,7 +223,8 @@ async function processContentIngestion(job: Job<ContentIngestionJob>) {
 
     // Store extracted content as text file
     const fileName = `ingestion/${projectId}/${Date.now()}-extracted.txt`;
-    await storageService.uploadFile('ASSETS', fileName, text, {
+    const BucketName = 'ASSETS' as const;
+    await storageService.uploadFile(BucketName, fileName, text, {
       contentType: 'text/plain',
       metadata: finalMetadata,
     });

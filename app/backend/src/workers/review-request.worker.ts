@@ -19,6 +19,7 @@ import { PrismaClient } from '@prisma/client';
 import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
 import type { ReviewRequestJob } from '../queues/index.js';
+import { getRedisClient, createRedisClient } from '../utils/redis-client.js';
 
 const prisma = new PrismaClient();
 

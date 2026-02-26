@@ -1,10 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Card, CardHeader, CardContent } from '../components/Card';
-import { Button } from '../components/Button';
-import { Badge } from '../components/Badge';
-import { Plus, Upload, Share2, BarChart3, Play, Trash2, ArrowLeft } from 'lucide-react';
-import { SidebarNav } from '../components/SidebarNav';
+import React, { useState, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { getAccessToken } from "../lib/supabase";
+import { Card, CardHeader, CardContent } from "../components/Card";
+import { Button } from "../components/Button";
+import { Badge } from "../components/Badge";
+import {
+  Plus,
+  Upload,
+  Share2,
+  BarChart3,
+  Play,
+  Trash2,
+  ArrowLeft,
+} from "lucide-react";
+import { SidebarNav } from "../components/SidebarNav";
 
 export function ContentStudio() {
   return (
@@ -31,22 +40,22 @@ function ContentStudioContent() {
   const fetchProjects = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('supabase.auth.token');
+      const token = getAccessToken();
       if (!token) return;
 
       // Get current business (from URL or context)
-      const response = await fetch('http://localhost:3001/businesses', {
-        headers: { 'Authorization': `Bearer ${token}` },
+      const response = await fetch("http://localhost:3001/businesses", {
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (response.ok) {
         const businesses = await response.json();
         if (businesses.length > 0) {
           const businessId = businesses[0].id;
-          
+
           const projectsResponse = await fetch(
             `http://localhost:3001/businesses/${businessId}/content-projects`,
-            { headers: { 'Authorization': `Bearer ${token}` } }
+            { headers: { Authorization: `Bearer ${token}` } },
           );
 
           if (projectsResponse.ok) {
@@ -56,7 +65,7 @@ function ContentStudioContent() {
         }
       }
     } catch (error) {
-      console.error('Failed to fetch projects:', error);
+      console.error("Failed to fetch projects:", error);
     } finally {
       setLoading(false);
     }
@@ -64,32 +73,35 @@ function ContentStudioContent() {
 
   const handleCreateProject = async (formData: any) => {
     try {
-      const token = localStorage.getItem('supabase.auth.token');
-      const response = await fetch('http://localhost:3001/businesses/1/content-projects', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
+      const token = getAccessToken();
+      const response = await fetch(
+        "http://localhost:3001/businesses/1/content-projects",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(formData),
         },
-        body: JSON.stringify(formData),
-      });
+      );
 
       if (response.ok) {
         setShowNewProjectForm(false);
         fetchProjects();
       }
     } catch (error) {
-      console.error('Failed to create project:', error);
+      console.error("Failed to create project:", error);
     }
   };
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, string> = {
-      processing: 'warning',
-      ready: 'success',
-      published: 'default',
+      processing: "warning",
+      ready: "success",
+      published: "default",
     };
-    return variants[status] || 'info';
+    return variants[status] || "info";
   };
 
   if (selectedProject) {
@@ -110,7 +122,10 @@ function ContentStudioContent() {
                 {selectedProject.title}
               </h2>
               <p className="text-gray-600 dark:text-gray-400 mt-2">
-                Status: <Badge variant={getStatusBadge(selectedProject.status)}>{selectedProject.status}</Badge>
+                Status:{" "}
+                <Badge variant={getStatusBadge(selectedProject.status)}>
+                  {selectedProject.status}
+                </Badge>
               </p>
             </CardHeader>
             <CardContent>
@@ -120,16 +135,23 @@ function ContentStudioContent() {
                     <h3 className="font-semibold mb-4">Generated Reels</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {selectedProject.reels.map((reel: any) => (
-                        <div key={reel.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                        <div
+                          key={reel.id}
+                          className="border border-gray-200 dark:border-gray-700 rounded-lg p-4"
+                        >
                           <div className="flex justify-between items-start mb-2">
                             <h4 className="font-semibold">{reel.title}</h4>
                             <Badge variant="info">{reel.platform}</Badge>
                           </div>
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{reel.hook}</p>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                            {reel.hook}
+                          </p>
                           <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
                             <div>
                               <span className="text-gray-500">Score</span>
-                              <p className="font-semibold">{Math.round(reel.prePublishScore)}/100</p>
+                              <p className="font-semibold">
+                                {Math.round(reel.prePublishScore)}/100
+                              </p>
                             </div>
                             <div>
                               <span className="text-gray-500">Duration</span>
@@ -141,11 +163,19 @@ function ContentStudioContent() {
                             </div>
                           </div>
                           <div className="flex gap-2">
-                            <Button variant="outline" size="sm" className="flex-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1"
+                            >
                               <Play className="w-4 h-4" />
                               Preview
                             </Button>
-                            <Button variant="outline" size="sm" className="flex-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1"
+                            >
                               <Share2 className="w-4 h-4" />
                               Publish
                             </Button>
@@ -155,7 +185,9 @@ function ContentStudioContent() {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-gray-500">No reels generated yet. Processing content...</p>
+                  <p className="text-gray-500">
+                    No reels generated yet. Processing content...
+                  </p>
                 )}
               </div>
             </CardContent>
@@ -178,10 +210,7 @@ function ContentStudioContent() {
               Transform your content into engaging social media reels
             </p>
           </div>
-          <Button 
-            variant="primary"
-            onClick={() => setShowNewProjectForm(true)}
-          >
+          <Button variant="primary" onClick={() => setShowNewProjectForm(true)}>
             <Plus className="w-5 h-5" />
             New Project
           </Button>
@@ -194,7 +223,7 @@ function ContentStudioContent() {
               <h2 className="text-xl font-bold">Create New Project</h2>
             </CardHeader>
             <CardContent>
-              <NewProjectForm 
+              <NewProjectForm
                 onSubmit={handleCreateProject}
                 onCancel={() => setShowNewProjectForm(false)}
               />
@@ -217,7 +246,7 @@ function ContentStudioContent() {
               <p className="text-gray-600 dark:text-gray-400 mb-6">
                 Create your first content project to get started
               </p>
-              <Button 
+              <Button
                 variant="primary"
                 onClick={() => setShowNewProjectForm(true)}
               >
@@ -229,14 +258,15 @@ function ContentStudioContent() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {projects.map((project) => (
-              <Card 
+              <Card
                 key={project.id}
                 className="cursor-pointer hover:shadow-lg transition-shadow"
               >
                 <CardHeader>
                   <div className="flex justify-between items-start">
                     <h3 className="font-semibold text-gray-900 dark:text-white truncate flex-1">
-                      {project.inputText?.substring(0, 30) || `Project ${project.id.substring(0, 8)}`}
+                      {project.inputText?.substring(0, 30) ||
+                        `Project ${project.id.substring(0, 8)}`}
                     </h3>
                     <Badge variant={getStatusBadge(project.status)}>
                       {project.status}
@@ -270,9 +300,9 @@ function ContentStudioContent() {
 
 function NewProjectForm({ onSubmit, onCancel }: any) {
   const [formData, setFormData] = useState({
-    inputType: 'text',
-    inputText: '',
-    style: 'educational',
+    inputType: "text",
+    inputText: "",
+    style: "educational",
     reelsRequested: 3,
   });
 
@@ -287,7 +317,9 @@ function NewProjectForm({ onSubmit, onCancel }: any) {
         <label className="block text-sm font-medium mb-2">Input Type</label>
         <select
           value={formData.inputType}
-          onChange={(e) => setFormData({ ...formData, inputType: e.target.value })}
+          onChange={(e) =>
+            setFormData({ ...formData, inputType: e.target.value })
+          }
           className="w-full px-3 py-2 border border-gray-300 rounded-lg dark:bg-gray-800 dark:border-gray-600"
         >
           <option value="text">Text</option>
@@ -301,7 +333,9 @@ function NewProjectForm({ onSubmit, onCancel }: any) {
         <label className="block text-sm font-medium mb-2">Content</label>
         <textarea
           value={formData.inputText}
-          onChange={(e) => setFormData({ ...formData, inputText: e.target.value })}
+          onChange={(e) =>
+            setFormData({ ...formData, inputText: e.target.value })
+          }
           placeholder="Paste your content here..."
           className="w-full px-3 py-2 border border-gray-300 rounded-lg h-24 dark:bg-gray-800 dark:border-gray-600"
         />
@@ -312,7 +346,9 @@ function NewProjectForm({ onSubmit, onCancel }: any) {
           <label className="block text-sm font-medium mb-2">Style</label>
           <select
             value={formData.style}
-            onChange={(e) => setFormData({ ...formData, style: e.target.value })}
+            onChange={(e) =>
+              setFormData({ ...formData, style: e.target.value })
+            }
             className="w-full px-3 py-2 border border-gray-300 rounded-lg dark:bg-gray-800 dark:border-gray-600"
           >
             <option value="educational">Educational</option>
@@ -329,7 +365,12 @@ function NewProjectForm({ onSubmit, onCancel }: any) {
             min="1"
             max="10"
             value={formData.reelsRequested}
-            onChange={(e) => setFormData({ ...formData, reelsRequested: parseInt(e.target.value) })}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                reelsRequested: parseInt(e.target.value),
+              })
+            }
             className="w-full px-3 py-2 border border-gray-300 rounded-lg dark:bg-gray-800 dark:border-gray-600"
           />
         </div>
@@ -339,7 +380,12 @@ function NewProjectForm({ onSubmit, onCancel }: any) {
         <Button variant="primary" className="flex-1" type="submit">
           Create Project
         </Button>
-        <Button variant="outline" className="flex-1" type="button" onClick={onCancel}>
+        <Button
+          variant="outline"
+          className="flex-1"
+          type="button"
+          onClick={onCancel}
+        >
           Cancel
         </Button>
       </div>

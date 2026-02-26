@@ -3,9 +3,9 @@
  * Catches and handles React errors gracefully
  */
 
-import React, { ReactNode } from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
-import { Button } from './Button';
+import React, { ReactNode } from "react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
+import { Button } from "./Button";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -17,7 +17,10 @@ interface ErrorBoundaryState {
   errorInfo: { componentStack: string } | null;
 }
 
-export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+export class ErrorBoundary extends React.Component<
+  ErrorBoundaryProps,
+  ErrorBoundaryState
+> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = {
@@ -32,9 +35,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('Error caught by boundary:', error, errorInfo);
+    console.error("Error caught by boundary:", error, errorInfo);
     this.setState({
-      errorInfo: { componentStack: errorInfo.componentStack || 'Unknown component stack' },
+      errorInfo: {
+        componentStack: errorInfo.componentStack || "Unknown component stack",
+      },
     });
   }
 
@@ -44,7 +49,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       error: null,
       errorInfo: null,
     });
-    window.location.href = '/dashboard';
+    window.location.href = "/dashboard";
   };
 
   render() {
@@ -65,17 +70,19 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                 Oops! Something went wrong
               </h1>
               <p className="text-gray-600 dark:text-gray-400 mb-4">
-                We apologize for the inconvenience. An unexpected error occurred in the application.
+                We apologize for the inconvenience. An unexpected error occurred
+                in the application.
               </p>
-              
-              {process.env.NODE_ENV === 'development' && this.state.error && (
+
+              {process.env.NODE_ENV === "development" && this.state.error && (
                 <details className="mb-6 text-left">
                   <summary className="cursor-pointer text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
                     Error details (dev only)
                   </summary>
                   <pre className="mt-2 p-3 bg-gray-100 dark:bg-gray-800 rounded text-xs overflow-auto text-red-600 dark:text-red-400">
                     {this.state.error.toString()}
-                    {this.state.errorInfo && `\n\nComponent Stack:\n${this.state.errorInfo.componentStack}`}
+                    {this.state.errorInfo &&
+                      `\n\nComponent Stack:\n${this.state.errorInfo.componentStack}`}
                   </pre>
                 </details>
               )}
@@ -92,7 +99,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                 <RefreshCw className="w-4 h-4" />
                 Return to Dashboard
               </Button>
-              
+
               <Button
                 onClick={() => window.location.reload()}
                 variant="outline"
@@ -105,9 +112,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
             {/* Help Link */}
             <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
-              If the problem persists,<br/>
-              <a 
-                href="mailto:support@salesape.com" 
+              If the problem persists,
+              <br />
+              <a
+                href="mailto:support@salesape.com"
                 className="text-pink-600 dark:text-pink-400 hover:underline"
               >
                 contact our support team

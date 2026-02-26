@@ -3,10 +3,10 @@
  * Calendar view for scheduling content
  */
 
-import React, { useState, useEffect } from 'react';
-import { Card } from './Card';
-import { Button } from './Button';
-import { Loading } from './Loading';
+import React, { useState, useEffect } from "react";
+import { Card } from "./Card";
+import { Button } from "./Button";
+import { Loading } from "./Loading";
 
 interface ScheduledPost {
   id: string;
@@ -22,7 +22,9 @@ interface CalendarData {
   [date: string]: ScheduledPost[];
 }
 
-export const ContentCalendar: React.FC<{ businessId: string }> = ({ businessId }) => {
+export const ContentCalendar: React.FC<{ businessId: string }> = ({
+  businessId,
+}) => {
   const [month, setMonth] = useState(new Date());
   const [calendar, setCalendar] = useState<CalendarData>({});
   const [loading, setLoading] = useState(true);
@@ -35,22 +37,22 @@ export const ContentCalendar: React.FC<{ businessId: string }> = ({ businessId }
   const fetchCalendar = async () => {
     try {
       setLoading(true);
-      const monthStr = month.toISOString().split('T')[0];
+      const monthStr = month.toISOString().split("T")[0];
       const response = await fetch(
         `/api/businesses/${businessId}/schedule/calendar?month=${monthStr}`,
         {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
           },
-        }
+        },
       );
 
-      if (!response.ok) throw new Error('Failed to fetch calendar');
+      if (!response.ok) throw new Error("Failed to fetch calendar");
 
       const result = await response.json();
       setCalendar(result.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
@@ -84,10 +86,14 @@ export const ContentCalendar: React.FC<{ businessId: string }> = ({ businessId }
     days.push(i);
   }
 
-  if (loading) return <Loading isLoading={true} message="Loading calendar..." />;
+  if (loading)
+    return <Loading isLoading={true} message="Loading calendar..." />;
   if (error) return <div className="text-red-600">Error: {error}</div>;
 
-  const monthName = month.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const monthName = month.toLocaleString("default", {
+    month: "long",
+    year: "numeric",
+  });
 
   return (
     <div className="space-y-6">
@@ -99,7 +105,7 @@ export const ContentCalendar: React.FC<{ businessId: string }> = ({ businessId }
         </div>
 
         <div className="grid grid-cols-7 gap-2 mb-4">
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
             <div key={day} className="text-center font-semibold text-sm">
               {day}
             </div>
@@ -111,7 +117,7 @@ export const ContentCalendar: React.FC<{ businessId: string }> = ({ businessId }
             const dateStr = day
               ? new Date(month.getFullYear(), month.getMonth(), day)
                   .toISOString()
-                  .split('T')[0]
+                  .split("T")[0]
               : null;
             const posts = dateStr ? calendar[dateStr] || [] : [];
 
@@ -120,8 +126,8 @@ export const ContentCalendar: React.FC<{ businessId: string }> = ({ businessId }
                 key={index}
                 className={`min-h-24 p-2 border rounded ${
                   day
-                    ? 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer'
-                    : 'bg-gray-100 dark:bg-gray-900'
+                    ? "bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
+                    : "bg-gray-100 dark:bg-gray-900"
                 }`}
               >
                 {day && (
@@ -163,11 +169,14 @@ const ScheduleStats: React.FC<{ businessId: string }> = ({ businessId }) => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const response = await fetch(`/api/businesses/${businessId}/schedule/stats`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        const response = await fetch(
+          `/api/businesses/${businessId}/schedule/stats`,
+          {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
           },
-        });
+        );
         const result = await response.json();
         setStats(result.data);
       } finally {
@@ -195,7 +204,10 @@ const ScheduleStats: React.FC<{ businessId: string }> = ({ businessId }) => {
   );
 };
 
-const StatItem: React.FC<{ label: string; value: number }> = ({ label, value }) => (
+const StatItem: React.FC<{ label: string; value: number }> = ({
+  label,
+  value,
+}) => (
   <div className="text-center">
     <p className="text-2xl font-bold text-blue-600">{value}</p>
     <p className="text-sm text-gray-600 dark:text-gray-400">{label}</p>

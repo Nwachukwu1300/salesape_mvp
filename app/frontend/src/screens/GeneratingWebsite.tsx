@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { GenerationStatus, GenerationStep } from '../types/website-config';
+import React, { useEffect, useState, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
+import { GenerationStatus, GenerationStep } from "../types/website-config";
 
 interface StatusResponse {
   status: GenerationStatus;
@@ -12,15 +12,26 @@ interface StatusResponse {
   imageAssets: any | null;
 }
 
-const STEP_INFO: Record<string, { label: string; progress: number; icon: string }> = {
-  queued: { label: 'Preparing', progress: 5, icon: '⏳' },
-  scraping: { label: 'Analyzing your website', progress: 20, icon: '🔍' },
-  analyzing: { label: 'Understanding your business', progress: 40, icon: '🧠' },
-  selecting_template: { label: 'Selecting the perfect template', progress: 60, icon: '🎨' },
-  generating_config: { label: 'Generating website content', progress: 80, icon: '✍️' },
-  enriching_images: { label: 'Optimizing images', progress: 90, icon: '🖼️' },
-  completed: { label: 'Complete!', progress: 100, icon: '✅' },
-  failed: { label: 'Generation failed', progress: 0, icon: '❌' },
+const STEP_INFO: Record<
+  string,
+  { label: string; progress: number; icon: string }
+> = {
+  queued: { label: "Preparing", progress: 5, icon: "⏳" },
+  scraping: { label: "Analyzing your website", progress: 20, icon: "🔍" },
+  analyzing: { label: "Understanding your business", progress: 40, icon: "🧠" },
+  selecting_template: {
+    label: "Selecting the perfect template",
+    progress: 60,
+    icon: "🎨",
+  },
+  generating_config: {
+    label: "Generating website content",
+    progress: 80,
+    icon: "✍️",
+  },
+  enriching_images: { label: "Optimizing images", progress: 90, icon: "🖼️" },
+  completed: { label: "Complete!", progress: 100, icon: "✅" },
+  failed: { label: "Generation failed", progress: 0, icon: "❌" },
 };
 
 export const GeneratingWebsite: React.FC = () => {
@@ -29,27 +40,32 @@ export const GeneratingWebsite: React.FC = () => {
   const { getToken } = useAuth();
   const token = getToken();
 
-  const [status, setStatus] = useState<GenerationStatus>('idle');
-  const [step, setStep] = useState<string>('queued');
-  const [message, setMessage] = useState<string>('Starting website generation...');
+  const [status, setStatus] = useState<GenerationStatus>("idle");
+  const [step, setStep] = useState<string>("queued");
+  const [message, setMessage] = useState<string>(
+    "Starting website generation...",
+  );
   const [progress, setProgress] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
   const fetchStatus = useCallback(async () => {
     if (!businessId || !token) return;
 
     try {
-      const response = await fetch(`${API_URL}/businesses/${businessId}/website-status`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
+      const response = await fetch(
+        `${API_URL}/businesses/${businessId}/website-status`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         },
-      });
+      );
 
       if (!response.ok) {
-        throw new Error('Failed to fetch status');
+        throw new Error("Failed to fetch status");
       }
 
       const data: StatusResponse = await response.json();
@@ -62,7 +78,7 @@ export const GeneratingWebsite: React.FC = () => {
       setProgress(stepInfo.progress);
 
       // Handle completion
-      if (data.status === 'completed') {
+      if (data.status === "completed") {
         // Small delay before redirect for user to see completion
         setTimeout(() => {
           navigate(`/website-preview/${businessId}`);
@@ -70,16 +86,18 @@ export const GeneratingWebsite: React.FC = () => {
       }
 
       // Handle failure
-      if (data.status === 'failed') {
-        setError(data.message || 'Website generation failed. Please try again.');
+      if (data.status === "failed") {
+        setError(
+          data.message || "Website generation failed. Please try again.",
+        );
       }
 
       setPollCount((prev) => prev + 1);
     } catch (err) {
-      console.error('Status fetch error:', err);
+      console.error("Status fetch error:", err);
       // Don't set error on transient fetch failures, just continue polling
       if (pollCount > 30) {
-        setError('Connection lost. Please refresh the page.');
+        setError("Connection lost. Please refresh the page.");
       }
     }
   }, [businessId, token, pollCount, navigate, API_URL]);
@@ -90,32 +108,35 @@ export const GeneratingWebsite: React.FC = () => {
       if (!businessId || !token) return;
 
       try {
-        const response = await fetch(`${API_URL}/businesses/${businessId}/generate-website`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
+        const response = await fetch(
+          `${API_URL}/businesses/${businessId}/generate-website`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
           },
-        });
+        );
 
         const data = await response.json();
 
         if (!response.ok) {
           if (response.status === 409) {
             // Already generating, just poll
-            setStatus('processing');
+            setStatus("processing");
           } else {
-            throw new Error(data.error || 'Failed to start generation');
+            throw new Error(data.error || "Failed to start generation");
           }
         } else {
-          setStatus(data.status || 'queued');
-          if (data.status === 'completed') {
+          setStatus(data.status || "queued");
+          if (data.status === "completed") {
             // Sync fallback completed immediately
             navigate(`/website-preview/${businessId}`);
           }
         }
       } catch (err: any) {
-        setError(err.message || 'Failed to start website generation');
+        setError(err.message || "Failed to start website generation");
       }
     };
 
@@ -124,7 +145,7 @@ export const GeneratingWebsite: React.FC = () => {
 
   // Poll for status updates
   useEffect(() => {
-    if (status === 'completed' || status === 'failed' || status === 'idle') {
+    if (status === "completed" || status === "failed" || status === "idle") {
       return;
     }
 
@@ -135,7 +156,7 @@ export const GeneratingWebsite: React.FC = () => {
 
   const handleRetry = () => {
     setError(null);
-    setStatus('idle');
+    setStatus("idle");
     setPollCount(0);
     setProgress(0);
     // Will trigger the startGeneration effect
@@ -155,12 +176,14 @@ export const GeneratingWebsite: React.FC = () => {
               <span className="text-4xl">{stepInfo.icon}</span>
             </div>
             <h1 className="text-2xl font-bold text-white mb-2">
-              {status === 'completed' ? 'Website Ready!' : 'Creating Your Website'}
+              {status === "completed"
+                ? "Website Ready!"
+                : "Creating Your Website"}
             </h1>
             <p className="text-white/70 text-sm">
-              {status === 'completed'
-                ? 'Redirecting to your website...'
-                : 'This usually takes less than a minute'}
+              {status === "completed"
+                ? "Redirecting to your website..."
+                : "This usually takes less than a minute"}
             </p>
           </div>
 
@@ -186,7 +209,7 @@ export const GeneratingWebsite: React.FC = () => {
               <p className="text-white/80">{message}</p>
 
               {/* Animated dots */}
-              {status !== 'completed' && (
+              {status !== "completed" && (
                 <div className="flex justify-center gap-1 mt-4">
                   {[0, 1, 2].map((i) => (
                     <div
@@ -213,7 +236,7 @@ export const GeneratingWebsite: React.FC = () => {
                 Try Again
               </button>
               <button
-                onClick={() => navigate('/dashboard')}
+                onClick={() => navigate("/dashboard")}
                 className="w-full py-3 mt-3 bg-white/10 text-white font-semibold rounded-xl hover:bg-white/20 transition-colors"
               >
                 Back to Dashboard
@@ -226,7 +249,7 @@ export const GeneratingWebsite: React.FC = () => {
             <div className="mt-8 pt-6 border-t border-white/10">
               <div className="grid grid-cols-6 gap-2">
                 {Object.entries(STEP_INFO)
-                  .filter(([key]) => !['completed', 'failed'].includes(key))
+                  .filter(([key]) => !["completed", "failed"].includes(key))
                   .map(([key, info], idx) => {
                     const isActive = key === step;
                     const isPast = info.progress < stepInfo.progress;
@@ -236,10 +259,10 @@ export const GeneratingWebsite: React.FC = () => {
                         key={key}
                         className={`h-1 rounded-full transition-all ${
                           isActive
-                            ? 'bg-purple-400'
+                            ? "bg-purple-400"
                             : isPast
-                            ? 'bg-purple-600'
-                            : 'bg-white/10'
+                              ? "bg-purple-600"
+                              : "bg-white/10"
                         }`}
                       />
                     );

@@ -3,9 +3,9 @@
  * Main dashboard page for Phase 4
  */
 
-import React, { useState, useEffect } from 'react';
-import { Card } from './Card';
-import { Loading } from './Loading';
+import React, { useState, useEffect } from "react";
+import { Card } from "./Card";
+import { Loading } from "./Loading";
 
 interface DashboardData {
   totalImpressions: number;
@@ -45,22 +45,23 @@ export const Dashboard: React.FC<{ businessId: string }> = ({ businessId }) => {
       setLoading(true);
       const response = await fetch(`/api/businesses/${businessId}/dashboard`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
         },
       });
 
-      if (!response.ok) throw new Error('Failed to fetch dashboard');
+      if (!response.ok) throw new Error("Failed to fetch dashboard");
 
       const result = await response.json();
       setData(result.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading) return <Loading isLoading={true} message="Loading dashboard metrics..." />;
+  if (loading)
+    return <Loading isLoading={true} message="Loading dashboard metrics..." />;
   if (error) return <div className="text-red-600">Error: {error}</div>;
   if (!data) return <div>No data available</div>;
 
@@ -91,21 +92,26 @@ const MetricsCard: React.FC<{ title: string; value: string | number }> = ({
   value,
 }) => (
   <Card className="p-6">
-    <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">{title}</h3>
+    <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">
+      {title}
+    </h3>
     <p className="text-3xl font-bold mt-2">
-      {typeof value === 'number' ? value.toLocaleString() : value}
+      {typeof value === "number" ? value.toLocaleString() : value}
     </p>
   </Card>
 );
 
 const PlatformComparison: React.FC<{
-  platforms: DashboardData['topPlatforms'];
+  platforms: DashboardData["topPlatforms"];
 }> = ({ platforms }) => (
   <Card className="p-6">
     <h3 className="text-lg font-semibold mb-4">Top Platforms</h3>
     <div className="space-y-4">
       {platforms.map((platform) => (
-        <div key={platform.platform} className="flex items-center justify-between">
+        <div
+          key={platform.platform}
+          className="flex items-center justify-between"
+        >
           <div>
             <p className="font-medium capitalize">{platform.platform}</p>
             <p className="text-sm text-gray-500">{platform.count} posts</p>
@@ -121,7 +127,7 @@ const PlatformComparison: React.FC<{
 );
 
 const TopPerformingContent: React.FC<{
-  content: DashboardData['topContent'];
+  content: DashboardData["topContent"];
 }> = ({ content }) => (
   <Card className="p-6">
     <h3 className="text-lg font-semibold mb-4">Top Content</h3>
@@ -130,7 +136,9 @@ const TopPerformingContent: React.FC<{
         <div key={item.id} className="border-l-4 border-blue-500 pl-4">
           <p className="font-medium text-sm">{item.content}</p>
           <p className="text-xs text-gray-500">{item.platform}</p>
-          <p className="text-sm font-bold mt-1">{item.engagement} engagements</p>
+          <p className="text-sm font-bold mt-1">
+            {item.engagement} engagements
+          </p>
         </div>
       ))}
     </div>
@@ -138,7 +146,7 @@ const TopPerformingContent: React.FC<{
 );
 
 const RecentActivity: React.FC<{
-  activity: DashboardData['recentActivity'];
+  activity: DashboardData["recentActivity"];
 }> = ({ activity }) => (
   <Card className="p-6">
     <h3 className="text-lg font-semibold mb-4">Recent Activity</h3>

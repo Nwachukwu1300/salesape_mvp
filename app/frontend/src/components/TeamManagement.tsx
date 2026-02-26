@@ -3,10 +3,10 @@
  * Team members, roles, and permissions management
  */
 
-import React, { useState, useEffect } from 'react';
-import { Card } from './Card';
-import { Button } from './Button';
-import { Loading } from './Loading';
+import React, { useState, useEffect } from "react";
+import { Card } from "./Card";
+import { Button } from "./Button";
+import { Loading } from "./Loading";
 
 interface TeamMember {
   id: string;
@@ -23,7 +23,9 @@ interface RoleDescription {
   level: number;
 }
 
-export const TeamManagement: React.FC<{ businessId: string }> = ({ businessId }) => {
+export const TeamManagement: React.FC<{ businessId: string }> = ({
+  businessId,
+}) => {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [roles, setRoles] = useState<{ [key: string]: RoleDescription }>({});
   const [loading, setLoading] = useState(true);
@@ -39,17 +41,18 @@ export const TeamManagement: React.FC<{ businessId: string }> = ({ businessId })
       const [membersRes, rolesRes] = await Promise.all([
         fetch(`/api/businesses/${businessId}/team/members`, {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
           },
         }),
-        fetch('/api/team/role-descriptions', {
+        fetch("/api/team/role-descriptions", {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
           },
         }),
       ]);
 
-      if (!membersRes.ok || !rolesRes.ok) throw new Error('Failed to fetch data');
+      if (!membersRes.ok || !rolesRes.ok)
+        throw new Error("Failed to fetch data");
 
       const membersData = await membersRes.json();
       const rolesData = await rolesRes.json();
@@ -57,7 +60,7 @@ export const TeamManagement: React.FC<{ businessId: string }> = ({ businessId })
       setMembers(membersData.data);
       setRoles(rolesData.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
@@ -68,46 +71,47 @@ export const TeamManagement: React.FC<{ businessId: string }> = ({ businessId })
       const response = await fetch(
         `/api/businesses/${businessId}/team/members/${memberId}/role`,
         {
-          method: 'PUT',
+          method: "PUT",
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({ role: newRole }),
-        }
+        },
       );
 
-      if (!response.ok) throw new Error('Failed to update role');
+      if (!response.ok) throw new Error("Failed to update role");
 
       fetchData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update role');
+      setError(err instanceof Error ? err.message : "Failed to update role");
     }
   };
 
   const handleRemove = async (memberId: string) => {
-    if (!confirm('Are you sure you want to remove this team member?')) return;
+    if (!confirm("Are you sure you want to remove this team member?")) return;
 
     try {
       const response = await fetch(
         `/api/businesses/${businessId}/team/members/${memberId}`,
         {
-          method: 'DELETE',
+          method: "DELETE",
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
           },
-        }
+        },
       );
 
-      if (!response.ok) throw new Error('Failed to remove member');
+      if (!response.ok) throw new Error("Failed to remove member");
 
       setMembers(members.filter((m) => m.id !== memberId));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove member');
+      setError(err instanceof Error ? err.message : "Failed to remove member");
     }
   };
 
-  if (loading) return <Loading isLoading={true} message="Loading team data..." />;
+  if (loading)
+    return <Loading isLoading={true} message="Loading team data..." />;
   if (error) return <div className="text-red-600">Error: {error}</div>;
 
   return (
@@ -120,7 +124,9 @@ export const TeamManagement: React.FC<{ businessId: string }> = ({ businessId })
       </div>
 
       <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Team Members ({members.length})</h3>
+        <h3 className="text-lg font-semibold mb-4">
+          Team Members ({members.length})
+        </h3>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -134,7 +140,10 @@ export const TeamManagement: React.FC<{ businessId: string }> = ({ businessId })
             </thead>
             <tbody>
               {members.map((member) => (
-                <tr key={member.id} className="border-b hover:bg-gray-50 dark:hover:bg-gray-700">
+                <tr
+                  key={member.id}
+                  className="border-b hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
                   <td className="py-3 px-4">{member.name}</td>
                   <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">
                     {member.email}
@@ -142,7 +151,9 @@ export const TeamManagement: React.FC<{ businessId: string }> = ({ businessId })
                   <td className="py-3 px-4">
                     <select
                       value={member.role}
-                      onChange={(e) => handleRoleChange(member.id, e.target.value)}
+                      onChange={(e) =>
+                        handleRoleChange(member.id, e.target.value)
+                      }
                       className="px-2 py-1 border rounded text-sm"
                     >
                       <option value="admin">Admin</option>
@@ -187,7 +198,9 @@ const RolesInfo: React.FC<{ roles: { [key: string]: RoleDescription } }> = ({
           className="border rounded p-4 bg-gray-50 dark:bg-gray-800"
         >
           <h4 className="font-semibold mb-2">{role.name}</h4>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{role.description}</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {role.description}
+          </p>
         </div>
       ))}
     </div>
@@ -201,9 +214,9 @@ const PermissionsMatrix: React.FC = () => {
   useEffect(() => {
     const fetchMatrix = async () => {
       try {
-        const response = await fetch('/api/team/permissions-matrix', {
+        const response = await fetch("/api/team/permissions-matrix", {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
           },
         });
         const result = await response.json();
@@ -226,7 +239,10 @@ const PermissionsMatrix: React.FC = () => {
           <tr className="border-b">
             <th className="text-left py-2 px-2 font-semibold">Permission</th>
             {matrix.roles.map((role: string) => (
-              <th key={role} className="text-center py-2 px-2 font-semibold capitalize">
+              <th
+                key={role}
+                className="text-center py-2 px-2 font-semibold capitalize"
+              >
                 {role}
               </th>
             ))}
@@ -236,10 +252,13 @@ const PermissionsMatrix: React.FC = () => {
           {matrix.permissions.map((permission: string) => (
             <tr key={permission} className="border-b">
               <td className="py-2 px-2">
-                {permission.replace(/([A-Z])/g, ' $1').trim()}
+                {permission.replace(/([A-Z])/g, " $1").trim()}
               </td>
               {matrix.roles.map((role: string) => (
-                <td key={`${role}-${permission}`} className="text-center py-2 px-2">
+                <td
+                  key={`${role}-${permission}`}
+                  className="text-center py-2 px-2"
+                >
                   {matrix.matrix[role][permission] ? (
                     <span className="text-green-600 font-bold">✓</span>
                   ) : (

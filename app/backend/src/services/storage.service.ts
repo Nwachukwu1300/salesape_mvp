@@ -103,7 +103,8 @@ class StorageService {
 
       console.log(`[StorageService] Uploading to ${bucketName}/${filePath}`);
 
-      const { data, error } = await this.client.storage
+      const client = this.client as SupabaseClient;
+      const { data, error } = await client.storage
         .from(bucketName)
         .upload(filePath, fileData, uploadOptions);
 
@@ -116,7 +117,7 @@ class StorageService {
       }
 
       // Get public URL
-      const { data: publicData } = this.client.storage.from(bucketName).getPublicUrl(data.path);
+      const { data: publicData } = client.storage.from(bucketName).getPublicUrl(data.path);
 
       console.log(`[StorageService] Uploaded successfully: ${bucketName}/${filePath}`);
 
@@ -147,7 +148,8 @@ class StorageService {
 
       console.log(`[StorageService] Downloading from ${bucketName}/${filePath}`);
 
-      const { data, error } = await this.client.storage.from(bucketName).download(filePath);
+      const client = this.client as SupabaseClient;
+      const { data, error } = await client.storage.from(bucketName).download(filePath);
 
       if (error) {
         throw new Error(`Download failed: ${error.message}`);
@@ -180,7 +182,7 @@ class StorageService {
 
       console.log(`[StorageService] Deleting from ${bucketName}/${filePath}`);
 
-      const { error } = await this.client.storage.from(bucketName).remove([filePath]);
+      const { error } = await this.client!.storage.from(bucketName).remove([filePath]);
 
       if (error) {
         throw new Error(`Delete failed: ${error.message}`);
@@ -207,7 +209,8 @@ class StorageService {
 
     try {
       const bucketName = BUCKETS[bucketKey];
-      const { data } = this.client.storage.from(bucketName).getPublicUrl(filePath);
+      const client = this.client as SupabaseClient;
+      const { data } = client.storage.from(bucketName).getPublicUrl(filePath);
       return data?.publicUrl || null;
     } catch (error: any) {
       console.error(`[StorageService] Error getting public URL:`, error.message);
@@ -232,7 +235,8 @@ class StorageService {
 
       console.log(`[StorageService] Listing files in ${bucketName}/${folderPath || ''}`);
 
-      const { data, error } = await this.client.storage
+      const client = this.client as SupabaseClient;
+      const { data, error } = await client.storage
         .from(bucketName)
         .list(folderPath || '', {
           limit: 100,

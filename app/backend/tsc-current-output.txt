@@ -1,0 +1,2 @@
+src/services/storage.service.ts(210,24): error TS2531: Object is possibly 'null'.
+src/services/storage.service.ts(235,37): error TS2531: Object is possibly 'null'.

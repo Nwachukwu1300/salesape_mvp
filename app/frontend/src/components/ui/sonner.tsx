@@ -1,7 +1,17 @@
 "use client";
 
-import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
 import { Toaster as Sonner, ToasterProps } from "sonner";
+
+// Minimal local theme hook to avoid depending on next-themes
+const useTheme = () => {
+  const [theme, setTheme] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+    setTheme(prefersDark ? "dark" : "light");
+  }, []);
+  return { theme };
+};
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme();

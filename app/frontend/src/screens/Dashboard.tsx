@@ -1,35 +1,44 @@
-import { useNavigate } from 'react-router';
-import { Button } from '../components/Button';
-import { Card, CardHeader, CardContent } from '../components/Card';
-import { StatCard } from '../components/StatCard';
-import { Badge } from '../components/Badge';
-import { PricingModal } from '../components/PricingModal';
-import { UpgradePrompt } from '../components/UpgradePrompt';
-import { CalendarIntegrationModal } from '../components/CalendarIntegrationModal';
-import { SidebarNav } from '../components/SidebarNav';
-import { useSubscription } from '../contexts/SubscriptionContext';
-import { useAuth } from '../contexts/AuthContext';
-import { PRICING_PLANS } from '../lib/stripe';
-import { useState } from 'react';
-import React from 'react';
-import { 
-  Plus, 
-  Search, 
-  Calendar, 
-  Globe, 
-  Users, 
-  TrendingUp, 
+import { toast } from "sonner";
+import { useNavigate } from "react-router";
+import { getAccessToken } from "../lib/supabase";
+import { Button } from "../components/Button";
+import { Card, CardHeader, CardContent } from "../components/Card";
+import { StatCard } from "../components/StatCard";
+import { Badge } from "../components/Badge";
+import { PricingModal } from "../components/PricingModal";
+import { UpgradePrompt } from "../components/UpgradePrompt";
+import { CalendarIntegrationModal } from "../components/CalendarIntegrationModal";
+import { SidebarNav } from "../components/SidebarNav";
+import { useSubscription } from "../contexts/SubscriptionContext";
+import { useAuth } from "../contexts/AuthContext";
+import { PRICING_PLANS } from "../lib/stripe";
+import { useState } from "react";
+import React from "react";
+import {
+  Plus,
+  Search,
+  Calendar,
+  Globe,
+  Users,
+  TrendingUp,
   Eye,
   ExternalLink,
   Trash2,
   Crown,
-  Zap
-} from 'lucide-react';
+  Zap,
+} from "lucide-react";
 
 export function Dashboard() {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
-  const { currentPlan, canCreateWebsite, canRunSEOAudit, usage, seoAuditsRemaining, refreshUsage } = useSubscription();
+  const {
+    currentPlan,
+    canCreateWebsite,
+    canRunSEOAudit,
+    usage,
+    seoAuditsRemaining,
+    refreshUsage,
+  } = useSubscription();
   const [showPricing, setShowPricing] = useState(false);
   const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [websites, setWebsites] = useState<any[]>([]);
@@ -42,7 +51,7 @@ export function Dashboard() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem('supabase.auth.token');
+        const token = getAccessToken();
         if (!token) {
           setWebsites([]);
           setDashboardStats(null);
@@ -50,41 +59,56 @@ export function Dashboard() {
         }
 
         // Fetch businesses list
-        const businessesResponse = await fetch('http://localhost:3001/businesses', {
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
+        const businessesResponse = await fetch(
+          "http://localhost:3001/businesses",
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
 
         if (businessesResponse.ok) {
           const data = await businessesResponse.json();
           // Map business records to website format for display
-          const websitesList = (Array.isArray(data) ? data : []).map((business: any) => ({
-            id: business.id,
-            name: business.name,
-            url: business.slug ? `${business.slug}.salesape.ai` : `website-${business.id.substring(0, 8)}.salesape.ai`,
-            status: business.isPublished ? 'Live' : 'Draft',
-            leads: business.leads?.length || 0,
-            bookings: business.bookings?.length || 0,
-            lastUpdated: new Date(business.updatedAt || business.createdAt).toLocaleDateString(),
-          }));
+          const websitesList = (Array.isArray(data) ? data : []).map(
+            (business: any) => ({
+              id: business.id,
+              name: business.name,
+              url: business.slug
+                ? `${business.slug}.salesape.ai`
+                : `website-${business.id.substring(0, 8)}.salesape.ai`,
+              status: business.isPublished ? "Live" : "Draft",
+              leads: business.leads?.length || 0,
+              bookings: business.bookings?.length || 0,
+              lastUpdated: new Date(
+                business.updatedAt || business.createdAt,
+              ).toLocaleDateString(),
+            }),
+          );
           setWebsites(websitesList);
         }
 
         // Fetch dashboard stats
         try {
-          const statsResponse = await fetch('http://localhost:3001/dashboard/stats', {
-            headers: { 'Authorization': `Bearer ${token}` },
-          });
-          
+          const statsResponse = await fetch(
+            "http://localhost:3001/dashboard/stats",
+            {
+              headers: { Authorization: `Bearer ${token}` },
+            },
+          );
+
           if (statsResponse.ok) {
             const stats = await statsResponse.json();
             setDashboardStats(stats.summary || stats);
           }
         } catch (statsError) {
-          console.warn('Failed to fetch dashboard stats, using local calculations:', statsError);
+          console.warn(
+            "Failed to fetch dashboard stats, using local calculations:",
+            statsError,
+          );
           // Stats will be calculated from websites array as fallback
         }
       } catch (error) {
-        console.error('Failed to fetch data:', error);
+        console.error("Failed to fetch data:", error);
         setWebsites([]);
         setDashboardStats(null);
       } finally {
@@ -100,42 +124,48 @@ export function Dashboard() {
       setShowPricing(true);
       return;
     }
-    navigate('/create-website');
+    navigate("/create-website");
   };
 
-  const handleDeleteWebsite = async (websiteId: string, websiteName: string) => {
+  const handleDeleteWebsite = async (
+    websiteId: string,
+    websiteName: string,
+  ) => {
     const confirmed = window.confirm(
-      `Are you sure you want to delete "${websiteName}"? This action cannot be undone.`
+      `Are you sure you want to delete "${websiteName}"? This action cannot be undone.`,
     );
-    
+
     if (!confirmed) return;
 
     try {
       setDeletingId(websiteId);
-      const token = localStorage.getItem('supabase.auth.token');
-      
-      const response = await fetch(`http://localhost:3001/businesses/${websiteId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
+      const token = localStorage.getItem("supabase.auth.token");
+
+      const response = await fetch(
+        `http://localhost:3001/businesses/${websiteId}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         },
-      });
+      );
 
       if (response.ok) {
-        setWebsites(websites.filter(w => w.id !== websiteId));
-        alert(`Website "${websiteName}" deleted successfully`);
+        setWebsites(websites.filter((w) => w.id !== websiteId));
+        toast.info(`Website "${websiteName}" deleted successfully`);
         try {
           if (refreshUsage) await refreshUsage();
         } catch (err) {
-          console.warn('Failed to refresh usage after delete', err);
+          console.warn("Failed to refresh usage after delete", err);
         }
       } else {
         const errorData = await response.json();
-        alert(`Error: ${errorData.error || 'Failed to delete website'}`);
+        toast.info(`Error: ${errorData.error || "Failed to delete website"}`);
       }
     } catch (error) {
-      console.error('Delete error:', error);
-      alert('Error deleting website. Please try again.');
+      console.error("Delete error:", error);
+      toast.info("Error deleting website. Please try again.");
     } finally {
       setDeletingId(null);
     }
@@ -146,8 +176,8 @@ export function Dashboard() {
       {/* Sidebar Navigation */}
       <SidebarNav currentPath="/dashboard" />
 
-      <PricingModal 
-        isOpen={showPricing} 
+      <PricingModal
+        isOpen={showPricing}
         onClose={() => setShowPricing(false)}
         highlightPlan="pro"
       />
@@ -165,20 +195,21 @@ export function Dashboard() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {currentPlan !== 'free' && (
-              <Badge 
+            {currentPlan !== "free" && (
+              <Badge
                 variant="warning"
-                style={{ backgroundColor: '#f724de', color: 'white', border: 'none' }}
+                style={{
+                  backgroundColor: "#f724de",
+                  color: "white",
+                  border: "none",
+                }}
               >
                 <Crown className="w-3 h-3" />
                 {PRICING_PLANS[currentPlan].name}
               </Badge>
             )}
-            {currentPlan === 'free' && (
-              <Button 
-                variant="primary"
-                onClick={() => setShowPricing(true)}
-              >
+            {currentPlan === "free" && (
+              <Button variant="primary" onClick={() => setShowPricing(true)}>
                 <Crown className="w-5 h-5" />
                 Upgrade Now
               </Button>
@@ -187,10 +218,10 @@ export function Dashboard() {
         </div>
 
         {/* Upgrade Prompt for Free Users */}
-        {currentPlan === 'free' && !canCreateWebsite && (
+        {currentPlan === "free" && !canCreateWebsite && (
           <div className="mb-8">
-            <UpgradePrompt 
-              feature="website" 
+            <UpgradePrompt
+              feature="website"
               onUpgrade={() => setShowPricing(true)}
             />
           </div>
@@ -198,9 +229,9 @@ export function Dashboard() {
 
         {/* Action Buttons */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <Button 
-            variant="primary" 
-            size="lg" 
+          <Button
+            variant="primary"
+            size="lg"
             className="w-full"
             onClick={handleCreateWebsite}
           >
@@ -213,25 +244,25 @@ export function Dashboard() {
             size="lg"
             className="w-full"
             onClick={() => {
-              if (currentPlan === 'free' && !canRunSEOAudit) {
+              if (currentPlan === "free" && !canRunSEOAudit) {
                 setShowPricing(true);
               } else {
-                navigate('/seo-audit');
+                navigate("/seo-audit");
               }
             }}
-            disabled={currentPlan === 'free' && !canRunSEOAudit}
+            disabled={currentPlan === "free" && !canRunSEOAudit}
           >
             <Search className="w-5 h-5" />
             Run SEO Audit
             <span className="text-xs font-semibold">
-              {currentPlan === 'free' ? `(${seoAuditsRemaining}/2)` : ''}
+              {currentPlan === "free" ? `(${seoAuditsRemaining}/2)` : ""}
             </span>
           </Button>
-          <Button 
-            variant="outline" 
-            size="lg" 
+          <Button
+            variant="outline"
+            size="lg"
             className="w-full"
-            onClick={() => navigate('/manage-bookings')}
+            onClick={() => navigate("/manage-bookings")}
           >
             <Calendar className="w-5 h-5" />
             Manage Bookings
@@ -243,27 +274,56 @@ export function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <StatCard
               title="Active Websites"
-              value={dashboardStats?.liveWebsites ?? websites.filter(w => w.status === 'Live').length}
+              value={
+                dashboardStats?.liveWebsites ??
+                websites.filter((w) => w.status === "Live").length
+              }
               icon={Globe}
-              trend={{ value: `${dashboardStats?.totalWebsites ?? websites.length} total`, positive: (dashboardStats?.totalWebsites ?? websites.length) > 0 }}
+              trend={{
+                value: `${dashboardStats?.totalWebsites ?? websites.length} total`,
+                positive:
+                  (dashboardStats?.totalWebsites ?? websites.length) > 0,
+              }}
             />
             <StatCard
               title="Total Leads"
-              value={dashboardStats?.totalLeads ?? websites.reduce((sum, w) => sum + w.leads, 0)}
+              value={
+                dashboardStats?.totalLeads ??
+                websites.reduce((sum, w) => sum + w.leads, 0)
+              }
               icon={Users}
-              trend={{ value: dashboardStats?.totalLeads ? '+0 this week' : 'Start with a website', positive: true }}
+              trend={{
+                value: dashboardStats?.totalLeads
+                  ? "+0 this week"
+                  : "Start with a website",
+                positive: true,
+              }}
             />
             <StatCard
               title="Conversion Rate"
-              value={dashboardStats?.conversionRate ? `${(dashboardStats.conversionRate * 100).toFixed(1)}%` : '0%'}
+              value={
+                dashboardStats?.conversionRate
+                  ? `${(dashboardStats.conversionRate * 100).toFixed(1)}%`
+                  : "0%"
+              }
               icon={TrendingUp}
-              trend={{ value: 'Leads to Bookings', positive: (dashboardStats?.conversionRate ?? 0) > 0 }}
+              trend={{
+                value: "Leads to Bookings",
+                positive: (dashboardStats?.conversionRate ?? 0) > 0,
+              }}
             />
             <StatCard
               title="Avg SEO Score"
-              value={dashboardStats?.avgSeoScore ? Math.round(dashboardStats.avgSeoScore) : 'N/A'}
+              value={
+                dashboardStats?.avgSeoScore
+                  ? Math.round(dashboardStats.avgSeoScore)
+                  : "N/A"
+              }
               icon={Search}
-              trend={{ value: 'Domain Authority', positive: (dashboardStats?.avgSeoScore ?? 0) > 50 }}
+              trend={{
+                value: "Domain Authority",
+                positive: (dashboardStats?.avgSeoScore ?? 0) > 50,
+              }}
             />
           </div>
         )}
@@ -272,8 +332,12 @@ export function Dashboard() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Your Websites</h2>
-              <Badge variant="info">{websites.filter(w => w.status === 'Live').length} Live</Badge>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                Your Websites
+              </h2>
+              <Badge variant="info">
+                {websites.filter((w) => w.status === "Live").length} Live
+              </Badge>
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -292,37 +356,41 @@ export function Dashboard() {
                       <a
                         href={`https://${website.url}`}
                         className="text-sm flex items-center gap-1"
-                        style={{ color: '#f724de' }}
+                        style={{ color: "#f724de" }}
                         onClick={(e) => e.stopPropagation()}
                       >
                         {website.url}
                         <ExternalLink className="w-3 h-3" />
                       </a>
                     </div>
-                    <Badge variant="success">
-                      {website.status}
-                    </Badge>
+                    <Badge variant="success">{website.status}</Badge>
                   </div>
-                  
+
                   <div className="grid grid-cols-3 gap-4 mb-3">
                     <div className="flex items-center gap-2 text-sm">
                       <Users className="w-4 h-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">{website.leads} leads</span>
+                      <span className="text-gray-600 dark:text-gray-400">
+                        {website.leads} leads
+                      </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                       <Calendar className="w-4 h-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">{website.bookings} bookings</span>
+                      <span className="text-gray-600 dark:text-gray-400">
+                        {website.bookings} bookings
+                      </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                       <Zap className="w-4 h-4 text-gray-400" />
-                      <span className="text-gray-600 dark:text-gray-400">Updated {website.lastUpdated}</span>
+                      <span className="text-gray-600 dark:text-gray-400">
+                        Updated {website.lastUpdated}
+                      </span>
                     </div>
                   </div>
 
                   <div className="flex gap-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
+                    <Button
+                      variant="outline"
+                      size="sm"
                       className="flex-1 md:flex-none"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -340,31 +408,32 @@ export function Dashboard() {
                       }}
                       disabled={deletingId === website.id}
                       style={{
-                        border: '2px solid #dc2626',
-                        color: '#dc2626',
-                        backgroundColor: 'transparent',
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        cursor: deletingId === website.id ? 'not-allowed' : 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        fontSize: '14px',
-                        fontWeight: '500',
+                        border: "2px solid #dc2626",
+                        color: "#dc2626",
+                        backgroundColor: "transparent",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        cursor:
+                          deletingId === website.id ? "not-allowed" : "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        fontSize: "14px",
+                        fontWeight: "500",
                         opacity: deletingId === website.id ? 0.6 : 1,
-                        transition: 'all 0.2s'
+                        transition: "all 0.2s",
                       }}
                       onMouseEnter={(e) => {
                         if (deletingId !== website.id) {
-                          e.currentTarget.style.backgroundColor = '#fee2e2';
+                          e.currentTarget.style.backgroundColor = "#fee2e2";
                         }
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.backgroundColor = "transparent";
                       }}
                     >
                       <Trash2 className="w-4 h-4" />
-                      {deletingId === website.id ? 'Deleting...' : 'Delete'}
+                      {deletingId === website.id ? "Deleting..." : "Delete"}
                     </button>
                   </div>
                 </div>
@@ -377,18 +446,22 @@ export function Dashboard() {
         {websites.length === 0 && (
           <Card>
             <CardContent className="py-16 text-center">
-              <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{ backgroundColor: '#f4f0e5' }}>
-                <Globe className="w-8 h-8" style={{ color: '#f724de' }} />
+              <div
+                className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+                style={{ backgroundColor: "#f4f0e5" }}
+              >
+                <Globe className="w-8 h-8" style={{ color: "#f724de" }} />
               </div>
               <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
                 No websites yet
               </h3>
               <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
-                Create your first AI-powered website in just 2 minutes. We'll handle everything from design to lead capture.
+                Create your first AI-powered website in just 2 minutes. We'll
+                handle everything from design to lead capture.
               </p>
-              <Button 
+              <Button
                 variant="primary"
-                onClick={() => navigate('/create-website')}
+                onClick={() => navigate("/create-website")}
               >
                 <Plus className="w-5 h-5" />
                 Create Your First Website
@@ -417,7 +490,7 @@ export function Dashboard() {
         />
 
         {/* Calendar Integration Modal */}
-        <CalendarIntegrationModal 
+        <CalendarIntegrationModal
           isOpen={showCalendarModal}
           onClose={() => setShowCalendarModal(false)}
         />

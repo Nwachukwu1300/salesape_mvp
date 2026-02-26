@@ -1,15 +1,15 @@
-import { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
-import { supabase, getAccessToken, setAccessToken } from '../lib/supabase';
+// src/contexts/AuthContext.tsx
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useRef,
+  ReactNode,
+} from "react";
+import { supabase, getAccessToken, setAccessToken } from "../lib/supabase";
 
-// Dynamic API URL: uses the same host as the frontend but on port 3001
-const getApiUrl = () => {
-  if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    return `http://${hostname}:3001`;
-  }
-  return import.meta.env.VITE_API_URL || 'http://localhost:3001';
-};
-
+// Types
 interface User {
   id: string;
   email: string;
@@ -22,23 +22,24 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, fullName?: string) => Promise<void>;
   signOut: () => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
-  signInWithApple: () => Promise<void>;
+  signInWithGoogle: () => void;
+  signInWithApple: () => void;
   resetPassword: (email: string) => Promise<void>;
   getToken: () => string | null;
 }
 
+// Context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 min
 
+// JWT Parser
 function parseJwt(token: string | null) {
   if (!token) return null;
   try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const json = decodeURIComponent(atob(payload).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
     return JSON.parse(json);
   } catch {
     return null;
@@ -50,116 +51,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Reset inactivity timer
   const resetInactivityTimer = () => {
-    if (inactivityTimerRef.current) {
-      clearTimeout(inactivityTimerRef.current);
-    }
+    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
 
     const token = getAccessToken();
     if (token) {
       inactivityTimerRef.current = setTimeout(() => {
-        console.log('Inactivity timeout - auto signing out');
+        console.log("Inactivity timeout - signing out");
         signOut();
       }, INACTIVITY_TIMEOUT);
     }
   };
 
+  // Load session on mount
   useEffect(() => {
-    console.log('=== AuthProvider useEffect initializing ===');
     setLoading(true);
-    
-    // Try to load session from memory/storage
+
     const loadSession = async () => {
-      try {
-        // Get current session from memory
-        const token = getAccessToken();
-        console.log('Token from memory:', token ? `${token.substring(0, 20)}...` : 'NOT FOUND');
-        
-        if (token) {
-          const payload = parseJwt(token);
-          console.log('Parsed JWT payload:', payload);
-          if (payload && payload.sub) {
-            setUser({ id: payload.sub, email: payload.email });
-            console.log('User set from token:', payload.sub);
-            resetInactivityTimer();
-          } else {
-            console.log('Invalid token payload');
-            setAccessToken(null);
-            setUser(null);
-          }
+      const token = getAccessToken();
+      if (token) {
+        const payload = parseJwt(token);
+        if (payload?.sub && payload.email) {
+          setUser({ id: payload.sub, email: payload.email, full_name: payload.full_name });
+          resetInactivityTimer();
         } else {
+          setAccessToken(null);
           setUser(null);
         }
-      } catch (error) {
-        console.error('Error loading session:', error);
+      } else {
         setUser(null);
-      } finally {
-        setLoading(false);
       }
+      setLoading(false);
     };
-    
+
     loadSession();
 
-    // Set up activity listeners
-    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
-    const handleActivity = () => {
-      resetInactivityTimer();
-    };
-
-    events.forEach(event => {
-      document.addEventListener(event, handleActivity);
-    });
+    // Activity listeners for inactivity
+    const events = ["mousedown", "keydown", "scroll", "touchstart", "click"];
+    const handleActivity = () => resetInactivityTimer();
+    events.forEach((e) => document.addEventListener(e, handleActivity));
 
     return () => {
-      events.forEach(event => {
-        document.removeEventListener(event, handleActivity);
-      });
-      if (inactivityTimerRef.current) {
-        clearTimeout(inactivityTimerRef.current);
-      }
+      events.forEach((e) => document.removeEventListener(e, handleActivity));
+      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
     };
   }, []);
 
+  // ----- Auth Functions -----
   const signIn = async (email: string, password: string) => {
     setLoading(true);
     try {
-      console.log('=== Supabase SignIn START ===');
-      const result = await supabase.auth.signIn(email, password);
-      console.log('SignIn result:', { hasError: !!result.error, hasData: !!result.data });
-      
-      if (result.error) {
-        console.error('SignIn error:', result.error);
-        throw new Error(result.error.message || 'Sign in failed');
-      }
+      const { data, error } = await supabase.auth.signIn(email, password);
+      if (error) throw new Error(error.message);
 
-      // Check that token was saved in memory
       const token = getAccessToken();
-      console.log('Token in memory after signIn:', !!token);
-      
-      if (!token) {
-        throw new Error('No authentication token received. Please try again.');
-      }
-      
-      // Parse token to get user info
-      const payload = parseJwt(token);
-      if (payload && payload.sub) {
-        setUser({ 
-          id: payload.sub, 
-          email: payload.email,
-          full_name: payload.full_name
-        });
-        console.log('User set from token:', payload.email);
-      } else {
-        throw new Error('Invalid token payload');
-      }
+      if (!token) throw new Error("No token received after sign-in");
 
+      const payload = parseJwt(token);
+      if (!payload?.sub) throw new Error("Invalid token payload");
+
+      setUser({ id: payload.sub, email: payload.email, full_name: payload.full_name });
       resetInactivityTimer();
-      console.log('=== Supabase SignIn SUCCESS ===');
-    } catch (err: any) {
-      console.error('=== SignIn FAILED ===', err.message);
-      setUser(null);
-      setAccessToken(null);
-      throw err;
     } finally {
       setLoading(false);
     }
@@ -168,38 +121,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = async (email: string, password: string, fullName?: string) => {
     setLoading(true);
     try {
-      console.log('=== Supabase SignUp START ===');
-      const result = await supabase.auth.signUp(email, password);
-      
-      if (result.error) {
-        console.error('SignUp error:', result.error);
-        throw new Error(result.error.message || 'Sign up failed');
-      }
-      
-      // Check that token was saved in memory
+      const { data, error } = await supabase.auth.signUp(email, password);
+      if (error) throw new Error(error.message);
+
       const token = getAccessToken();
-      console.log('Token saved:', !!token);
-      
-      if (!token) {
-        throw new Error('No authentication token received after signup. Please try again.');
-      }
-      
-      if (result.data?.id) {
-        setUser({ 
-          id: result.data.id, 
-          email: result.data.email, 
-          full_name: fullName 
-        });
-        console.log('User set:', result.data.email);
-      }
-      
+      if (!token) throw new Error("No token received after sign-up");
+
+      const payload = parseJwt(token);
+      setUser({ id: payload?.sub!, email: payload?.email!, full_name: fullName });
       resetInactivityTimer();
-      console.log('=== Supabase SignUp SUCCESS ===');
-    } catch (err: any) {
-      console.error('=== SignUp FAILED ===', err.message);
-      setUser(null);
-      setAccessToken(null);
-      throw err;
     } finally {
       setLoading(false);
     }
@@ -207,65 +137,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     try {
-      console.log('=== SignOut START ===');
-      
-      // Call backend to clear refresh cookie
-      try {
-        await fetch(`${getApiUrl()}/api/auth/clear-refresh-cookie`, { method: 'POST' });
-      } catch (err) {
-        console.warn('Failed to clear refresh cookie:', err);
-      }
-      
-      // Clear auth context state
       setAccessToken(null);
       setUser(null);
-      
-      // Clear inactivity timer
       if (inactivityTimerRef.current) {
         clearTimeout(inactivityTimerRef.current);
         inactivityTimerRef.current = null;
       }
-      
-      // Clear Supabase session
       await supabase.auth.signOut();
-      
-      console.log('=== SignOut SUCCESS ===');
     } catch (error) {
-      console.error('SignOut error:', error);
+      console.error("SignOut error:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const signInWithGoogle = async () => {
-    const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/g, '');
-    window.location.href = `${API_BASE}/auth/google`;
+  const signInWithGoogle = () => {
+    window.location.href = `${import.meta.env.VITE_API_URL}/auth/google`;
   };
 
-  const signInWithApple = async () => {
-    const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/+$/g, '');
-    window.location.href = `${API_BASE}/auth/apple`;
+  const signInWithApple = () => {
+    window.location.href = `${import.meta.env.VITE_API_URL}/auth/apple`;
   };
 
   const resetPassword = async (email: string) => {
     setLoading(true);
     try {
-      const API_BASE = getApiUrl().replace(/\/+$/g, '');
-      await fetch(`${API_BASE}/auth/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await fetch(`${import.meta.env.VITE_API_URL}/auth/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-    } catch (err) {
-      console.error('Password reset error:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const getToken = (): string | null => {
-    return getAccessToken() || null;
-  };
+  const getToken = () => getAccessToken() || null;
 
   return (
     <AuthContext.Provider
@@ -288,8 +195,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error("useAuth must be used within AuthProvider");
   return context;
 }

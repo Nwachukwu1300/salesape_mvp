@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Loader2, AlertCircle, ArrowLeft } from 'lucide-react';
-import { SidebarNav } from '../components/SidebarNav';
-import { useAuth } from '../contexts/AuthContext';
-import { startConversation } from '../lib/api';
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Loader2, AlertCircle, ArrowLeft } from "lucide-react";
+import { SidebarNav } from "../components/SidebarNav";
+import { useAuth } from "../contexts/AuthContext";
+import { startConversation } from "../lib/api";
 
 export function CreateWebsite() {
   const navigate = useNavigate();
@@ -14,15 +14,15 @@ export function CreateWebsite() {
   useEffect(() => {
     // If auth is still loading, don't do anything yet
     if (authLoading) {
-      console.log('Auth is loading, waiting...');
+      console.log("Auth is loading, waiting...");
       return;
     }
 
     // If no user and auth is done loading, redirect to login
     if (!user && !authLoading) {
-      console.log('No user found and auth loaded - redirecting to login');
-      setError('You must be logged in to create a website.');
-      setTimeout(() => navigate('/login'), 2000);
+      console.log("No user found and auth loaded - redirecting to login");
+      setError("You must be logged in to create a website.");
+      setTimeout(() => navigate("/login"), 2000);
       return;
     }
 
@@ -35,31 +35,34 @@ export function CreateWebsite() {
   const initConversation = async () => {
     try {
       setIsInitializing(true);
-      
+
       // Check for valid token
       const token = getToken();
       if (!token) {
-        setError('Authentication token not found. Please log in again.');
-        setTimeout(() => navigate('/login'), 2000);
+        setError("Authentication token not found. Please log in again.");
+        setTimeout(() => navigate("/login"), 2000);
         return;
       }
 
-      console.log('Starting conversation with token:', token.substring(0, 20) + '...');
-      
+      console.log(
+        "Starting conversation with token:",
+        token.substring(0, 20) + "...",
+      );
+
       // Call the conversation start API with timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-      
-      const response = await fetch('http://localhost:3001/conversation/start', {
-        method: 'POST',
+
+      const response = await fetch("http://localhost:3001/conversation/start", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({}),
         signal: controller.signal,
       });
-      
+
       clearTimeout(timeoutId);
 
       if (!response.ok) {
@@ -68,32 +71,37 @@ export function CreateWebsite() {
       }
 
       const data = await response.json();
-      console.log('Conversation started:', data);
-      
+      console.log("Conversation started:", data);
+
       if (data?.sessionId) {
         // Save conversation state to sessionStorage
         const conversationState = {
           sessionId: data.sessionId,
-          stage: data.stage || 'initial',
-          currentQuestion: data.currentQuestion || 'What is your business name?',
+          stage: data.stage || "initial",
+          currentQuestion:
+            data.currentQuestion || "What is your business name?",
           extracted: data.extracted || {},
           isComplete: data.isComplete || false,
           questionNumber: data.questionNumber || 1,
           totalQuestions: data.totalQuestions || 10,
         };
-        sessionStorage.setItem(`conv_${data.sessionId}`, JSON.stringify(conversationState));
-        
+        sessionStorage.setItem(
+          `conv_${data.sessionId}`,
+          JSON.stringify(conversationState),
+        );
+
         // Navigate to conversation page
         navigate(`/conversation/${data.sessionId}/question`);
       } else {
-        throw new Error('No session ID received from server');
+        throw new Error("No session ID received from server");
       }
     } catch (err: any) {
-      console.error('Error starting conversation:', err);
-      let errorMsg = 'Failed to start conversation';
-      
-      if (err.name === 'AbortError') {
-        errorMsg = 'Request timeout - server took too long to respond. Please try again.';
+      console.error("Error starting conversation:", err);
+      let errorMsg = "Failed to start conversation";
+
+      if (err.name === "AbortError") {
+        errorMsg =
+          "Request timeout - server took too long to respond. Please try again.";
       } else if (err?.response?.data?.message) {
         errorMsg = err.response.data.message;
       } else if (err?.response?.data?.error) {
@@ -101,9 +109,9 @@ export function CreateWebsite() {
       } else if (err?.message) {
         errorMsg = err.message;
       }
-      
+
       setError(`Error: ${errorMsg}. Please try again.`);
-      setTimeout(() => navigate('/dashboard'), 3000);
+      setTimeout(() => navigate("/dashboard"), 3000);
     } finally {
       setIsInitializing(false);
     }
@@ -115,7 +123,9 @@ export function CreateWebsite() {
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
         <div className="text-center">
           <Loader2 className="w-12 h-12 text-purple-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-400">Loading authentication...</p>
+          <p className="text-gray-600 dark:text-gray-400">
+            Loading authentication...
+          </p>
         </div>
       </div>
     );
@@ -127,7 +137,9 @@ export function CreateWebsite() {
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
         <div className="text-center">
           <Loader2 className="w-12 h-12 text-purple-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-400">Starting website creation wizard...</p>
+          <p className="text-gray-600 dark:text-gray-400">
+            Starting website creation wizard...
+          </p>
         </div>
       </div>
     );
@@ -136,14 +148,16 @@ export function CreateWebsite() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
       <SidebarNav currentPath="/create-website" />
-      
+
       <div className="text-center">
         {error ? (
           <div className="max-w-md">
             <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex gap-3">
               <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
+                <p className="text-sm text-red-700 dark:text-red-300">
+                  {error}
+                </p>
               </div>
             </div>
           </div>

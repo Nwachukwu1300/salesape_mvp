@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { X, Check, Zap, Crown, Building2, Loader2 } from 'lucide-react';
-import { Button } from './Button';
-import { Card, CardContent } from './Card';
-import { PRICING_PLANS, PlanType } from '../lib/stripe';
-import { useAuth } from '../contexts/AuthContext';
+import { toast } from "sonner";
+import { useState } from "react";
+import { X, Check, Zap, Crown, Building2, Loader2 } from "lucide-react";
+import { Button } from "./Button";
+import { Card, CardContent } from "./Card";
+import { PRICING_PLANS, PlanType } from "../lib/stripe";
+import { useAuth } from "../contexts/AuthContext";
 
 interface PricingModalProps {
   isOpen: boolean;
@@ -12,14 +13,18 @@ interface PricingModalProps {
   plans?: any;
 }
 
-export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalProps) {
+export function PricingModal({
+  isOpen,
+  onClose,
+  highlightPlan,
+}: PricingModalProps) {
   const { user } = useAuth();
   const [loading, setLoading] = useState<PlanType | null>(null);
 
   if (!isOpen) return null;
 
   const handleSubscribe = async (plan: PlanType) => {
-    if (plan === 'free') {
+    if (plan === "free") {
       onClose();
       return;
     }
@@ -28,16 +33,18 @@ export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalPro
 
     try {
       // Mock Stripe checkout - replace with real Stripe integration
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
       // Simulate redirect to success page
-      alert(`Redirecting to Stripe checkout for ${PRICING_PLANS[plan].name} plan...`);
-      
+      toast.info(
+        `Redirecting to Stripe checkout for ${PRICING_PLANS[plan].name} plan...`,
+      );
+
       // In production, redirect to Stripe Checkout:
       // window.location.href = checkoutUrl;
     } catch (error) {
-      console.error('Error creating checkout session:', error);
-      alert('Failed to start checkout. Please try again.');
+      console.error("Error creating checkout session:", error);
+      toast.info("Failed to start checkout. Please try again.");
     } finally {
       setLoading(null);
     }
@@ -75,7 +82,8 @@ export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalPro
           {(Object.keys(PRICING_PLANS) as PlanType[]).map((planKey) => {
             const plan = PRICING_PLANS[planKey];
             const Icon = planIcons[planKey];
-            const isHighlighted = planKey === highlightPlan || planKey === 'pro';
+            const isHighlighted =
+              planKey === highlightPlan || planKey === "pro";
             const isLoading = loading === planKey;
 
             return (
@@ -83,15 +91,21 @@ export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalPro
                 key={planKey}
                 className={`relative ${
                   isHighlighted
-                    ? 'ring-2 ring-offset-2 dark:ring-offset-gray-800 shadow-xl scale-105'
-                    : ''
+                    ? "ring-2 ring-offset-2 dark:ring-offset-gray-800 shadow-xl scale-105"
+                    : ""
                 }`}
-                style={isHighlighted ? ({ ['--tw-ring-color']: '#f724de' } as React.CSSProperties) : undefined}
+                style={
+                  isHighlighted
+                    ? ({
+                        ["--tw-ring-color"]: "#f724de",
+                      } as React.CSSProperties)
+                    : undefined
+                }
               >
                 {isHighlighted && (
                   <div
                     className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full text-white text-sm font-medium"
-                    style={{ backgroundColor: '#f724de' }}
+                    style={{ backgroundColor: "#f724de" }}
                   >
                     Most Popular
                   </div>
@@ -103,13 +117,14 @@ export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalPro
                     <div
                       className="p-3 rounded-lg"
                       style={{
-                        backgroundColor: planKey === 'pro' ? '#f724de' : '#f4f0e5',
+                        backgroundColor:
+                          planKey === "pro" ? "#f724de" : "#f4f0e5",
                       }}
                     >
                       <Icon
                         className="w-6 h-6"
                         style={{
-                          color: planKey === 'pro' ? 'white' : '#f724de',
+                          color: planKey === "pro" ? "white" : "#f724de",
                         }}
                       />
                     </div>
@@ -138,7 +153,7 @@ export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalPro
                       <li key={index} className="flex items-start gap-3">
                         <Check
                           className="w-5 h-5 flex-shrink-0 mt-0.5"
-                          style={{ color: '#f724de' }}
+                          style={{ color: "#f724de" }}
                         />
                         <span className="text-gray-600 dark:text-gray-400">
                           {feature}
@@ -149,7 +164,7 @@ export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalPro
 
                   {/* CTA Button */}
                   <Button
-                    variant={isHighlighted ? 'primary' : 'outline'}
+                    variant={isHighlighted ? "primary" : "outline"}
                     className="w-full"
                     onClick={() => handleSubscribe(planKey)}
                     disabled={isLoading}
@@ -159,12 +174,12 @@ export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalPro
                         <Loader2 className="w-5 h-5 animate-spin" />
                         Processing...
                       </>
-                    ) : planKey === 'free' ? (
-                      'Current Plan'
-                    ) : planKey === 'enterprise' ? (
-                      'Contact Sales'
+                    ) : planKey === "free" ? (
+                      "Current Plan"
+                    ) : planKey === "enterprise" ? (
+                      "Contact Sales"
                     ) : (
-                      'Get Started'
+                      "Get Started"
                     )}
                   </Button>
                 </CardContent>
@@ -180,7 +195,10 @@ export function PricingModal({ isOpen, onClose, highlightPlan }: PricingModalPro
               🔒 Secure payment powered by Stripe • Cancel anytime
             </p>
             <p>
-              Need help choosing? <a href="#" className="font-medium" style={{ color: '#f724de' }}>Contact our sales team</a>
+              Need help choosing?{" "}
+              <a href="#" className="font-medium" style={{ color: "#f724de" }}>
+                Contact our sales team
+              </a>
             </p>
           </div>
         </div>

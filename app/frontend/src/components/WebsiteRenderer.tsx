@@ -1,12 +1,22 @@
-import React, { useState } from 'react';
-import { WebsiteConfig } from '../types/website-config';
-import { ImageHeavyTemplate, ServiceHeavyTemplate, LuxuryTemplate } from '../templates';
+import { toast } from "sonner";
+import React, { useState } from "react";
+import { WebsiteConfig } from "../types/website-config";
+import {
+  ImageHeavyTemplate,
+  ServiceHeavyTemplate,
+  LuxuryTemplate,
+} from "../templates";
 
 interface WebsiteRendererProps {
   config: WebsiteConfig;
   templateId: string;
   businessId: string;
-  onLeadSubmit?: (data: { name: string; email: string; phone?: string; message?: string }) => Promise<void>;
+  onLeadSubmit?: (data: {
+    name: string;
+    email: string;
+    phone?: string;
+    message?: string;
+  }) => Promise<void>;
   onBookingClick?: () => void;
   isPreview?: boolean;
 }
@@ -23,7 +33,12 @@ export const WebsiteRenderer: React.FC<WebsiteRendererProps> = ({
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const handleLeadSubmit = async (data: { name: string; email: string; phone?: string; message?: string }) => {
+  const handleLeadSubmit = async (data: {
+    name: string;
+    email: string;
+    phone?: string;
+    message?: string;
+  }) => {
     if (isPreview) {
       // In preview mode, just show success
       setSubmitSuccess(true);
@@ -41,7 +56,7 @@ export const WebsiteRenderer: React.FC<WebsiteRendererProps> = ({
       setSubmitSuccess(true);
       setTimeout(() => setSubmitSuccess(false), 5000);
     } catch (error) {
-      setSubmitError('Failed to submit. Please try again.');
+      setSubmitError("Failed to submit. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -49,7 +64,7 @@ export const WebsiteRenderer: React.FC<WebsiteRendererProps> = ({
 
   const handleBookingClick = () => {
     if (isPreview) {
-      alert('Booking would open here in the live site.');
+      toast.info("Booking would open here in the live site.");
       return;
     }
     onBookingClick?.();
@@ -65,11 +80,11 @@ export const WebsiteRenderer: React.FC<WebsiteRendererProps> = ({
     };
 
     switch (templateId) {
-      case 'image-heavy':
+      case "image-heavy":
         return <ImageHeavyTemplate {...commonProps} />;
-      case 'service-heavy':
+      case "service-heavy":
         return <ServiceHeavyTemplate {...commonProps} />;
-      case 'luxury':
+      case "luxury":
         return <LuxuryTemplate {...commonProps} />;
       default:
         // Default to service-heavy if unknown template
@@ -85,24 +100,56 @@ export const WebsiteRenderer: React.FC<WebsiteRendererProps> = ({
           {isSubmitting && (
             <div className="bg-blue-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
               <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                  fill="none"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
               </svg>
               Sending...
             </div>
           )}
           {submitSuccess && (
             <div className="bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
               </svg>
               Message sent successfully!
             </div>
           )}
           {submitError && (
             <div className="bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
               {submitError}
             </div>

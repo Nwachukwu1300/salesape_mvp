@@ -1,10 +1,15 @@
-import React from 'react';
-import { WebsiteConfig } from '../types/website-config';
+import React from "react";
+import { WebsiteConfig } from "../types/website-config";
 
 interface TemplateProps {
   config: WebsiteConfig;
   businessId: string;
-  onLeadSubmit?: (data: { name: string; email: string; phone?: string; message?: string }) => void;
+  onLeadSubmit?: (data: {
+    name: string;
+    email: string;
+    phone?: string;
+    message?: string;
+  }) => void;
   onBookingClick?: () => void;
 }
 
@@ -14,51 +19,81 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
   onLeadSubmit,
   onBookingClick,
 }) => {
-  const primaryColor = config.branding.colors[0] || '#C4A052';
-  const secondaryColor = config.branding.colors[1] || '#1A1A1A';
+  const primaryColor = config.branding.colors[0] || "#C4A052";
+  const secondaryColor = config.branding.colors[1] || "#1A1A1A";
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     onLeadSubmit?.({
-      name: formData.get('name') as string,
-      email: formData.get('email') as string,
-      phone: formData.get('phone') as string,
-      message: formData.get('message') as string,
+      name: formData.get("name") as string,
+      email: formData.get("email") as string,
+      phone: formData.get("phone") as string,
+      message: formData.get("message") as string,
     });
   };
 
   return (
     <div
       className="min-h-screen bg-black text-white"
-      style={{ fontFamily: config.branding.fontFamily || '"Playfair Display", serif' }}
+      style={{
+        fontFamily: config.branding.fontFamily || '"Playfair Display", serif',
+      }}
     >
       {/* Elegant Header */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-md border-b border-white/10">
         <div className="max-w-7xl mx-auto px-6 py-5 flex justify-between items-center">
           {config.branding.logoUrl ? (
-            <img src={config.branding.logoUrl} alt="Logo" className="h-12" loading="lazy" />
+            <img
+              src={config.branding.logoUrl}
+              alt="Logo"
+              className="h-12"
+              loading="lazy"
+            />
           ) : (
-            <span className="text-2xl font-serif tracking-widest" style={{ color: primaryColor }}>
-              {config.meta.title.split('|')[0].toUpperCase()}
+            <span
+              className="text-2xl font-serif tracking-widest"
+              style={{ color: primaryColor }}
+            >
+              {config.meta.title.split("|")[0].toUpperCase()}
             </span>
           )}
           <nav className="hidden md:flex gap-10 text-sm tracking-widest uppercase">
-            <a href="#services" className="text-white/70 hover:text-white transition-colors">Services</a>
-            <a href="#about" className="text-white/70 hover:text-white transition-colors">About</a>
-            <a href="#testimonials" className="text-white/70 hover:text-white transition-colors">Testimonials</a>
-            <a href="#contact" className="text-white/70 hover:text-white transition-colors">Contact</a>
+            <a
+              href="#services"
+              className="text-white/70 hover:text-white transition-colors"
+            >
+              Services
+            </a>
+            <a
+              href="#about"
+              className="text-white/70 hover:text-white transition-colors"
+            >
+              About
+            </a>
+            <a
+              href="#testimonials"
+              className="text-white/70 hover:text-white transition-colors"
+            >
+              Testimonials
+            </a>
+            <a
+              href="#contact"
+              className="text-white/70 hover:text-white transition-colors"
+            >
+              Contact
+            </a>
           </nav>
           <a
-            href={config.hero.ctaLink || '#contact'}
+            href={config.hero.ctaLink || "#contact"}
             className="px-6 py-2 text-sm tracking-widest uppercase border transition-all hover:bg-white"
             style={{ borderColor: primaryColor, color: primaryColor }}
             onMouseEnter={(e) => {
               e.currentTarget.style.backgroundColor = primaryColor;
-              e.currentTarget.style.color = '#000';
+              e.currentTarget.style.color = "#000";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.backgroundColor = "transparent";
               e.currentTarget.style.color = primaryColor;
             }}
           >
@@ -68,7 +103,10 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
       </header>
 
       {/* Hero Section - Centered Elegant */}
-      <section id="hero" className="relative min-h-screen flex items-center justify-center">
+      <section
+        id="hero"
+        className="relative min-h-screen flex items-center justify-center"
+      >
         <div
           className="absolute inset-0 bg-cover bg-center"
           style={{ backgroundImage: `url(${config.hero.heroImage})` }}
@@ -86,11 +124,11 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
             {config.hero.subheadline}
           </p>
           <a
-            href={config.hero.ctaLink || '#contact'}
+            href={config.hero.ctaLink || "#contact"}
             className="inline-block px-10 py-4 text-sm tracking-[0.2em] uppercase border-2 transition-all hover:bg-white hover:text-black"
             style={{ borderColor: primaryColor }}
             onClick={(e) => {
-              if (config.hero.ctaLink === '#booking' && onBookingClick) {
+              if (config.hero.ctaLink === "#booking" && onBookingClick) {
                 e.preventDefault();
                 onBookingClick();
               }
@@ -112,7 +150,12 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
             <div className="flex flex-wrap justify-center items-center gap-10 text-sm tracking-widest uppercase text-white/60">
               {config.trustSignals.items.map((signal, idx) => (
                 <React.Fragment key={idx}>
-                  {idx > 0 && <span className="w-1 h-1 rounded-full" style={{ backgroundColor: primaryColor }} />}
+                  {idx > 0 && (
+                    <span
+                      className="w-1 h-1 rounded-full"
+                      style={{ backgroundColor: primaryColor }}
+                    />
+                  )}
                   <span>{signal}</span>
                 </React.Fragment>
               ))}
@@ -156,7 +199,9 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
                 )}
                 <div className="absolute inset-0 bg-black/60 group-hover:bg-black/80 transition-colors" />
                 <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
-                  <h3 className="text-2xl font-serif mb-4 tracking-wide">{service.name}</h3>
+                  <h3 className="text-2xl font-serif mb-4 tracking-wide">
+                    {service.name}
+                  </h3>
                   <p className="text-white/70 text-sm tracking-wide opacity-0 group-hover:opacity-100 transition-opacity">
                     {service.description}
                   </p>
@@ -196,19 +241,22 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
               <p className="text-white/70 text-lg leading-relaxed mb-10">
                 {config.about.content}
               </p>
-              {config.about.highlights && config.about.highlights.length > 0 && (
-                <div className="grid grid-cols-2 gap-4">
-                  {config.about.highlights.map((highlight, idx) => (
-                    <div key={idx} className="flex items-center gap-3">
-                      <div
-                        className="w-2 h-2"
-                        style={{ backgroundColor: primaryColor }}
-                      />
-                      <span className="text-sm tracking-wide text-white/80">{highlight}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {config.about.highlights &&
+                config.about.highlights.length > 0 && (
+                  <div className="grid grid-cols-2 gap-4">
+                    {config.about.highlights.map((highlight, idx) => (
+                      <div key={idx} className="flex items-center gap-3">
+                        <div
+                          className="w-2 h-2"
+                          style={{ backgroundColor: primaryColor }}
+                        />
+                        <span className="text-sm tracking-wide text-white/80">
+                          {highlight}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
             </div>
             {config.about.image && (
               <div className="relative">
@@ -254,7 +302,11 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
                       <svg
                         key={i}
                         className="w-4 h-4"
-                        fill={i < (testimonial.rating || 5) ? primaryColor : 'transparent'}
+                        fill={
+                          i < (testimonial.rating || 5)
+                            ? primaryColor
+                            : "transparent"
+                        }
                         stroke={primaryColor}
                         viewBox="0 0 20 20"
                       >
@@ -271,7 +323,9 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
                   />
                   <p className="font-serif tracking-wide">{testimonial.name}</p>
                   {testimonial.title && (
-                    <p className="text-sm text-white/50 mt-1">{testimonial.title}</p>
+                    <p className="text-sm text-white/50 mt-1">
+                      {testimonial.title}
+                    </p>
                   )}
                 </div>
               ))}
@@ -358,23 +412,35 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
             <div className="mt-20 pt-20 border-t border-white/10 grid md:grid-cols-3 gap-10 text-center">
               {config.contact.email && (
                 <div>
-                  <p className="text-sm tracking-widest uppercase text-white/40 mb-3">Email</p>
-                  <a href={`mailto:${config.contact.email}`} className="text-white hover:underline">
+                  <p className="text-sm tracking-widest uppercase text-white/40 mb-3">
+                    Email
+                  </p>
+                  <a
+                    href={`mailto:${config.contact.email}`}
+                    className="text-white hover:underline"
+                  >
                     {config.contact.email}
                   </a>
                 </div>
               )}
               {config.contact.phone && (
                 <div>
-                  <p className="text-sm tracking-widest uppercase text-white/40 mb-3">Phone</p>
-                  <a href={`tel:${config.contact.phone}`} className="text-white hover:underline">
+                  <p className="text-sm tracking-widest uppercase text-white/40 mb-3">
+                    Phone
+                  </p>
+                  <a
+                    href={`tel:${config.contact.phone}`}
+                    className="text-white hover:underline"
+                  >
                     {config.contact.phone}
                   </a>
                 </div>
               )}
               {config.contact.address && (
                 <div>
-                  <p className="text-sm tracking-widest uppercase text-white/40 mb-3">Location</p>
+                  <p className="text-sm tracking-widest uppercase text-white/40 mb-3">
+                    Location
+                  </p>
                   <span className="text-white">{config.contact.address}</span>
                 </div>
               )}
@@ -396,7 +462,7 @@ export const LuxuryTemplate: React.FC<TemplateProps> = ({
             <button
               onClick={onBookingClick}
               className="px-12 py-5 text-sm tracking-[0.2em] uppercase transition-all"
-              style={{ backgroundColor: primaryColor, color: '#000' }}
+              style={{ backgroundColor: primaryColor, color: "#000" }}
             >
               Reserve Your Experience
             </button>

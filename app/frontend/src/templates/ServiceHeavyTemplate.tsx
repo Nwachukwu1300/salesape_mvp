@@ -1,10 +1,15 @@
-import React from 'react';
-import { WebsiteConfig } from '../types/website-config';
+import React from "react";
+import { WebsiteConfig } from "../types/website-config";
 
 interface TemplateProps {
   config: WebsiteConfig;
   businessId: string;
-  onLeadSubmit?: (data: { name: string; email: string; phone?: string; message?: string }) => void;
+  onLeadSubmit?: (data: {
+    name: string;
+    email: string;
+    phone?: string;
+    message?: string;
+  }) => void;
   onBookingClick?: () => void;
 }
 
@@ -14,43 +19,59 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
   onLeadSubmit,
   onBookingClick,
 }) => {
-  const primaryColor = config.branding.colors[0] || '#3B82F6';
-  const secondaryColor = config.branding.colors[1] || '#1E40AF';
+  const primaryColor = config.branding.colors[0] || "#3B82F6";
+  const secondaryColor = config.branding.colors[1] || "#1E40AF";
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     onLeadSubmit?.({
-      name: formData.get('name') as string,
-      email: formData.get('email') as string,
-      phone: formData.get('phone') as string,
-      message: formData.get('message') as string,
+      name: formData.get("name") as string,
+      email: formData.get("email") as string,
+      phone: formData.get("phone") as string,
+      message: formData.get("message") as string,
     });
   };
 
   return (
     <div
       className="min-h-screen"
-      style={{ fontFamily: config.branding.fontFamily || 'Georgia, serif' }}
+      style={{ fontFamily: config.branding.fontFamily || "Georgia, serif" }}
     >
       {/* Header Navigation */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
           {config.branding.logoUrl ? (
-            <img src={config.branding.logoUrl} alt="Logo" className="h-10" loading="lazy" />
+            <img
+              src={config.branding.logoUrl}
+              alt="Logo"
+              className="h-10"
+              loading="lazy"
+            />
           ) : (
             <span className="text-xl font-bold" style={{ color: primaryColor }}>
-              {config.meta.title.split('|')[0]}
+              {config.meta.title.split("|")[0]}
             </span>
           )}
           <nav className="hidden md:flex gap-6">
-            <a href="#services" className="text-gray-600 hover:text-gray-900">Services</a>
-            <a href="#about" className="text-gray-600 hover:text-gray-900">About</a>
-            <a href="#testimonials" className="text-gray-600 hover:text-gray-900">Testimonials</a>
-            <a href="#contact" className="text-gray-600 hover:text-gray-900">Contact</a>
+            <a href="#services" className="text-gray-600 hover:text-gray-900">
+              Services
+            </a>
+            <a href="#about" className="text-gray-600 hover:text-gray-900">
+              About
+            </a>
+            <a
+              href="#testimonials"
+              className="text-gray-600 hover:text-gray-900"
+            >
+              Testimonials
+            </a>
+            <a href="#contact" className="text-gray-600 hover:text-gray-900">
+              Contact
+            </a>
           </nav>
           <a
-            href={config.hero.ctaLink || '#contact'}
+            href={config.hero.ctaLink || "#contact"}
             className="px-5 py-2 rounded-md text-white text-sm font-medium"
             style={{ backgroundColor: primaryColor }}
           >
@@ -80,11 +101,11 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
                 <a
-                  href={config.hero.ctaLink || '#contact'}
+                  href={config.hero.ctaLink || "#contact"}
                   className="inline-block px-8 py-4 text-center font-semibold rounded-md text-white transition-colors"
                   style={{ backgroundColor: primaryColor }}
                   onClick={(e) => {
-                    if (config.hero.ctaLink === '#booking' && onBookingClick) {
+                    if (config.hero.ctaLink === "#booking" && onBookingClick) {
                       e.preventDefault();
                       onBookingClick();
                     }
@@ -116,11 +137,21 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
                     className="w-12 h-12 rounded-full flex items-center justify-center mb-2"
                     style={{ backgroundColor: `${primaryColor}15` }}
                   >
-                    <svg className="w-6 h-6" fill={primaryColor} viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    <svg
+                      className="w-6 h-6"
+                      fill={primaryColor}
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
                     </svg>
                   </div>
-                  <span className="text-sm text-gray-700 font-medium">{signal}</span>
+                  <span className="text-sm text-gray-700 font-medium">
+                    {signal}
+                  </span>
                 </div>
               ))}
             </div>
@@ -136,7 +167,9 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
               {config.services.title}
             </h2>
             {config.services.subtitle && (
-              <p className="text-gray-600 text-lg">{config.services.subtitle}</p>
+              <p className="text-gray-600 text-lg">
+                {config.services.subtitle}
+              </p>
             )}
           </div>
           <div className="space-y-6">
@@ -149,15 +182,25 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
                   className="w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0"
                   style={{ backgroundColor: `${primaryColor}15` }}
                 >
-                  <span className="text-2xl font-bold" style={{ color: primaryColor }}>
+                  <span
+                    className="text-2xl font-bold"
+                    style={{ color: primaryColor }}
+                  >
                     {idx + 1}
                   </span>
                 </div>
                 <div className="flex-1">
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">{service.name}</h3>
-                  <p className="text-gray-600 leading-relaxed">{service.description}</p>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">
+                    {service.name}
+                  </h3>
+                  <p className="text-gray-600 leading-relaxed">
+                    {service.description}
+                  </p>
                   {service.price && (
-                    <p className="mt-3 font-semibold" style={{ color: primaryColor }}>
+                    <p
+                      className="mt-3 font-semibold"
+                      style={{ color: primaryColor }}
+                    >
                       Starting at {service.price}
                     </p>
                   )}
@@ -181,25 +224,32 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
               </div>
             </div>
             <div className="md:col-span-2">
-              {config.about.highlights && config.about.highlights.length > 0 && (
-                <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
-                  <h3 className="font-bold text-gray-900 mb-4">Why Choose Us</h3>
-                  <ul className="space-y-3">
-                    {config.about.highlights.map((highlight, idx) => (
-                      <li key={idx} className="flex items-start gap-3">
-                        <svg
-                          className="w-5 h-5 mt-0.5 flex-shrink-0"
-                          fill={primaryColor}
-                          viewBox="0 0 20 20"
-                        >
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                        </svg>
-                        <span className="text-gray-700">{highlight}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              {config.about.highlights &&
+                config.about.highlights.length > 0 && (
+                  <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+                    <h3 className="font-bold text-gray-900 mb-4">
+                      Why Choose Us
+                    </h3>
+                    <ul className="space-y-3">
+                      {config.about.highlights.map((highlight, idx) => (
+                        <li key={idx} className="flex items-start gap-3">
+                          <svg
+                            className="w-5 h-5 mt-0.5 flex-shrink-0"
+                            fill={primaryColor}
+                            viewBox="0 0 20 20"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          <span className="text-gray-700">{highlight}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               {config.about.image && (
                 <img
                   src={config.about.image}
@@ -235,7 +285,7 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
                     {[...Array(5)].map((_, i) => (
                       <svg
                         key={i}
-                        className={`w-4 h-4 ${i < (testimonial.rating || 5) ? 'text-yellow-400' : 'text-gray-300'}`}
+                        className={`w-4 h-4 ${i < (testimonial.rating || 5) ? "text-yellow-400" : "text-gray-300"}`}
                         fill="currentColor"
                         viewBox="0 0 20 20"
                       >
@@ -263,9 +313,13 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
                       </div>
                     )}
                     <div>
-                      <p className="font-semibold text-gray-900">{testimonial.name}</p>
+                      <p className="font-semibold text-gray-900">
+                        {testimonial.name}
+                      </p>
                       {testimonial.title && (
-                        <p className="text-sm text-gray-500">{testimonial.title}</p>
+                        <p className="text-sm text-gray-500">
+                          {testimonial.title}
+                        </p>
                       )}
                     </div>
                   </div>
@@ -286,34 +340,77 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
                   {config.contact.title}
                 </h2>
                 {config.contact.subtitle && (
-                  <p className="text-gray-400 mb-8">{config.contact.subtitle}</p>
+                  <p className="text-gray-400 mb-8">
+                    {config.contact.subtitle}
+                  </p>
                 )}
                 <div className="space-y-4">
                   {config.contact.email && (
                     <div className="flex items-center gap-3">
-                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      <svg
+                        className="w-5 h-5 text-gray-400"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                        />
                       </svg>
-                      <a href={`mailto:${config.contact.email}`} className="text-white hover:underline">
+                      <a
+                        href={`mailto:${config.contact.email}`}
+                        className="text-white hover:underline"
+                      >
                         {config.contact.email}
                       </a>
                     </div>
                   )}
                   {config.contact.phone && (
                     <div className="flex items-center gap-3">
-                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                      <svg
+                        className="w-5 h-5 text-gray-400"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                        />
                       </svg>
-                      <a href={`tel:${config.contact.phone}`} className="text-white hover:underline">
+                      <a
+                        href={`tel:${config.contact.phone}`}
+                        className="text-white hover:underline"
+                      >
                         {config.contact.phone}
                       </a>
                     </div>
                   )}
                   {config.contact.address && (
                     <div className="flex items-center gap-3">
-                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <svg
+                        className="w-5 h-5 text-gray-400"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
                       </svg>
                       <span>{config.contact.address}</span>
                     </div>
@@ -321,7 +418,10 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
                 </div>
               </div>
               <div>
-                <form onSubmit={handleSubmit} className="bg-white rounded-lg p-6 shadow-lg">
+                <form
+                  onSubmit={handleSubmit}
+                  className="bg-white rounded-lg p-6 shadow-lg"
+                >
                   <div className="space-y-4">
                     <input
                       type="text"
@@ -366,7 +466,11 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
 
       {/* Booking CTA */}
       {config.booking && (
-        <section id="booking" className="py-16 px-4" style={{ backgroundColor: primaryColor }}>
+        <section
+          id="booking"
+          className="py-16 px-4"
+          style={{ backgroundColor: primaryColor }}
+        >
           <div className="max-w-4xl mx-auto text-center text-white">
             <h2 className="text-2xl md:text-3xl font-bold mb-4">
               {config.booking.title}
