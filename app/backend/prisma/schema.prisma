@@ -515,3 +515,34 @@ model ApprovalHistory {
   @@index([businessId, createdAt])
   @@index([repurposedContentId])
 }
+// New models for Settings and audit
+model UserSettings {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  memoryEnabled Boolean  @default(false)
+  topK          Int      @default(5)
+  ttlDays       Int      @default(30)
+  twoFA         Boolean  @default(false)
+  growthMode    String   @default("BALANCED")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String
+  userId     String
+  action     String
+  details    Json?
+  createdAt  DateTime @default(now())
+}
+
+model AccountDeletionRequest {
+  id              String   @id @default(cuid())
+  userId          String
+  requestedBy     String
+  status          String   @default("PENDING") // PENDING, CANCELLED, COMPLETED
+  scheduledAt     DateTime?
+  requestedAt     DateTime @default(now())
+  reason          String?
+}
