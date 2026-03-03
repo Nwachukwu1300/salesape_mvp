@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { getAccessToken } from "../lib/supabase";
+import { API_BASE } from "../lib/api";
 import { Card, CardHeader, CardContent } from "../components/Card";
 import { Badge } from "../components/Badge";
 import {
@@ -11,7 +12,6 @@ import {
   BookOpen,
   Award,
 } from "lucide-react";
-import { SidebarNav } from "../components/SidebarNav";
 
 interface AnalyticsMetric {
   value: number | string;
@@ -33,7 +33,6 @@ interface AnalyticsData {
 export function Analytics() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <SidebarNav currentPath="/analytics" />
       <div className="pl-4 md:pl-0 pt-16 md:pt-0">
         <AnalyticsContent />
       </div>
@@ -46,6 +45,11 @@ function AnalyticsContent() {
   const [loading, setLoading] = useState(true);
   const [selectedWebsite, setSelectedWebsite] = useState<string | null>(null);
   const [websites, setWebsites] = useState<any[]>([]);
+  const apiBase =
+    API_BASE ||
+    (typeof window !== "undefined"
+      ? `http://${window.location.hostname}:3001`
+      : "http://localhost:3001");
 
   useEffect(() => {
     fetchWebsites();
@@ -63,7 +67,7 @@ function AnalyticsContent() {
       const token = getAccessToken();
       if (!token) return;
 
-      const response = await fetch("http://localhost:3001/businesses", {
+      const response = await fetch(`${apiBase}/businesses`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -85,7 +89,7 @@ function AnalyticsContent() {
     try {
       const token = getAccessToken();
       const response = await fetch(
-        `http://localhost:3001/businesses/${websiteId}/analytics`,
+        `${apiBase}/businesses/${websiteId}/analytics`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },

@@ -135,7 +135,8 @@ export function SEOAudit() {
         stack: err.stack,
         err: err,
       });
-      const errorMessage = err.message || "Failed to run SEO audit";
+      const errorMessage =
+        err?.message || err?.error || "Failed to run SEO audit";
       setError(errorMessage);
       toast.info(`Error: ${errorMessage}`);
     } finally {

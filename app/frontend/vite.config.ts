@@ -1,12 +1,12 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
+import react from "@vitejs/plugin-react";
 import path from "path";
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    extensions: [".js", ".jsx", ".ts", ".tsx", ".json"],
     alias: {
+      "@": path.resolve(__dirname, "./src"),
       "vaul@1.1.2": "vaul",
       "sonner@2.0.3": "sonner",
       "recharts@2.15.2": "recharts",
@@ -46,7 +46,6 @@ export default defineConfig({
       "@radix-ui/react-aspect-ratio@1.1.2": "@radix-ui/react-aspect-ratio",
       "@radix-ui/react-alert-dialog@1.1.6": "@radix-ui/react-alert-dialog",
       "@radix-ui/react-accordion@1.2.3": "@radix-ui/react-accordion",
-      "@": path.resolve(__dirname, "./src"),
     },
   },
   build: {
@@ -62,6 +61,27 @@ export default defineConfig({
         "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
       Pragma: "no-cache",
       Expires: "0",
+    },
+    // Proxy API requests to backend during development so that relative
+    // fetches (e.g. `/api/settings` or `/businesses`) work without hard‑coding
+    // the port. The backend listens on 3001 by default.
+    proxy: {
+      "/api": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+      "/businesses": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+      "^/team/(role-descriptions|permissions-matrix)$": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+      "^/conversation/(start|message|session/.*)$": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
     },
   },
 });

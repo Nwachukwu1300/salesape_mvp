@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { Card } from "./Card";
 import { Loading } from "./Loading";
+import { getAccessToken } from "../lib/supabase";
 
 interface DashboardData {
   totalImpressions: number;
@@ -33,19 +34,55 @@ interface DashboardData {
 
 export const Dashboard: React.FC<{ businessId: string }> = ({ businessId }) => {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [resolvedBusinessId, setResolvedBusinessId] = useState<string>(businessId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchDashboard();
+    const resolveBusinessId = async () => {
+      if (businessId) {
+        setResolvedBusinessId(businessId);
+        return;
+      }
+
+      const token = getAccessToken();
+      if (!token) {
+        setError("Missing auth token");
+        setLoading(false);
+        return;
+      }
+
+      const response = await fetch(`/businesses`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        throw new Error("Failed to resolve business");
+      }
+      const businesses = await response.json();
+      const id = Array.isArray(businesses) ? businesses[0]?.id : undefined;
+      if (!id) throw new Error("No business found for this account");
+      setResolvedBusinessId(id);
+    };
+
+    resolveBusinessId().catch((err) => {
+      setError(err instanceof Error ? err.message : "Failed to resolve business");
+      setLoading(false);
+    });
   }, [businessId]);
+
+  useEffect(() => {
+    if (!resolvedBusinessId) return;
+    fetchDashboard();
+  }, [resolvedBusinessId]);
 
   const fetchDashboard = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/businesses/${businessId}/dashboard`, {
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
+      const response = await fetch(`/businesses/${resolvedBusinessId}/dashboard`, {
         headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
+          Authorization: `Bearer ${token}`,
         },
       });
 

@@ -8,6 +8,7 @@ export const BusinessUnderstandingSchema = z.object({
   name: z.string().min(1, 'Business name is required'),
   category: z.string().min(1, 'Business category is required'),
   location: z.string().min(1, 'Business location is required'),
+  sourceUrl: z.string().optional(),
   services: z.array(z.string()).min(1, 'At least one service is required'),
   valueProposition: z.string().min(10, 'Value proposition must be at least 10 characters'),
   targetAudience: z.string().min(1, 'Target audience is required'),

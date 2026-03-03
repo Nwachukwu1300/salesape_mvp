@@ -3,7 +3,6 @@
  * Scrapes public Instagram profile data without API
  */
 
-import * as cheerio from 'cheerio';
 import axios from 'axios';
 
 interface InstagramProfile {

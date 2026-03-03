@@ -4,51 +4,60 @@ import { getRedisClient } from '../utils/redis-client.js';
 
 const router = express.Router();
 
-// Helper: assemble prompt from query, recent convo, and top-k memories (placeholder implementations)
 async function assemblePrompt(userId: string, query: string): Promise<string> {
   const client = getRedisClient();
   let memoriesText = '';
   try {
     const keys = await client.keys(`memory:${userId}:*`);
     const recent = keys.slice(0, 5);
-    for (const k of recent) {
-      const v = await client.get(k);
-      if (v) {
-        try {
-          const parsed = JSON.parse(v);
-          memoriesText += `Memory: ${parsed.text}\n`;
-        } catch {}
+    for (const key of recent) {
+      const value = await client.get(key);
+      if (!value) continue;
+      try {
+        const parsed = JSON.parse(value);
+        memoriesText += `Memory: ${parsed.text}\n`;
+      } catch {
+        // Ignore malformed memory records.
       }
     }
-  } catch (e) {
-    // ignore
+  } catch {
+    // Ignore memory read errors for chat availability.
   }
-  const prompt = `You are APE assistant. Use the following memories when answering if relevant:\n${memoriesText}\nUser query: ${query}`;
-  return prompt;
+
+  return [
+    'You are APE, the SalesAPE assistant.',
+    'Be concise, friendly, and practical.',
+    'Use memories if relevant.',
+    '',
+    memoriesText,
+    `User query: ${query}`,
+  ].join('\n');
 }
 
-// Helper: send SSE event
 function sseSend(res: Response, data: string, event?: string) {
   if (event) res.write(`event: ${event}\n`);
   res.write(`data: ${data}\n\n`);
 }
 
-// POST /api/ape/chat — streaming via OpenAI Responses streaming API (gpt-5-mini)
-router.post('/', async (req: Request, res: Response) => {
+async function handleApeChat(req: Request, res: Response) {
   const accept = req.headers.accept || '';
   const isSSE = accept.includes('text/event-stream');
-  const { userId, query } = req.body || {};
-  if (!userId || !query) return res.status(400).json({ error: 'userId and query required' });
+  const { query } = req.body || {};
+  const userId = (req as any).userId as string | undefined;
+
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!query) return res.status(400).json({ error: 'query required' });
 
   const prompt = await assemblePrompt(userId, query);
+  const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini';
 
-  // Non-streaming path
   if (!isSSE) {
     try {
-      const client = OpenAIClient;
-      const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini';
-      const resp = await client.responses.create({ model, input: prompt });
-      const text = (resp.output && resp.output[0] && (resp.output[0] as any).content) || JSON.stringify(resp);
+      const resp = await (OpenAIClient as any).responses.create({ model, input: prompt });
+      const text =
+        (resp as any)?.output_text ||
+        (resp as any)?.output?.[0]?.content?.[0]?.text ||
+        '';
       return res.json({ id: (resp as any).id || null, text });
     } catch (err: any) {
       console.error('/api/ape/chat error', err);
@@ -56,52 +65,70 @@ router.post('/', async (req: Request, res: Response) => {
     }
   }
 
-  // Streaming path (SSE) — use SDK streaming iterator
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
 
-  const client = OpenAIClient;
-  const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini';
-
   try {
-    // Start streaming responses from the SDK — responses.stream returns an async iterator
-    // The exact SDK shape may vary; we handle chunks and forward tokens as SSE events
-    const stream = await (client as any).responses.stream({ model, input: prompt });
+    const stream = await (OpenAIClient as any).responses.stream({ model, input: prompt });
+    let sentAny = false;
+    let sentDone = false;
 
     for await (const event of stream) {
-      // event may be: { type: 'response.delta', delta: { content: '...' } } or other control events
-      try {
-        if (!event) continue;
-        // Some SDKs yield strings or objects; normalize
-        if (typeof event === 'string') {
-          sseSend(res, JSON.stringify({ delta: event }));
-        } else if (event.type === 'response.delta' && event.delta) {
-          // delta content could be array or string
-          const d = (event.delta.content && (Array.isArray(event.delta.content) ? event.delta.content.join('') : event.delta.content)) || '';
-          if (d) sseSend(res, JSON.stringify({ delta: d }));
-        } else if (event.type === 'response.error') {
-          sseSend(res, JSON.stringify({ error: event.error || 'response error' }), 'error');
-        } else if (event.type === 'response.complete') {
-          sseSend(res, JSON.stringify({ done: true }), 'done');
-        } else if (event.delta && event.delta.content) {
-          const d = Array.isArray(event.delta.content) ? event.delta.content.join('') : event.delta.content;
-          sseSend(res, JSON.stringify({ delta: d }));
-        }
-      } catch (e) {
-        // send error but continue
-        sseSend(res, JSON.stringify({ error: (e as any).message || 'chunk error' }), 'error');
+      if (!event) continue;
+      if (event.type && String(event.type).includes('error')) {
+        sseSend(res, JSON.stringify({ error: event.error || 'response error' }), 'error');
+        sentAny = true;
+        continue;
+      }
+      const deltaCandidate =
+        event?.delta?.content ??
+        event?.delta?.text ??
+        event?.text ??
+        event?.output_text ??
+        event?.delta;
+      const delta =
+        typeof deltaCandidate === 'string'
+          ? deltaCandidate
+          : Array.isArray(deltaCandidate)
+            ? deltaCandidate.join('')
+            : '';
+      if (delta) {
+        sseSend(res, JSON.stringify({ delta }));
+        sentAny = true;
+        continue;
+      }
+      if (typeof event === 'string') {
+        sseSend(res, JSON.stringify({ delta: event }));
+        sentAny = true;
+        continue;
+      }
+      if (event.type === 'response.complete' || event.type === 'response.output_text.done') {
+        sseSend(res, JSON.stringify({ done: true }), 'done');
+        sentAny = true;
+        sentDone = true;
+        continue;
       }
     }
-
-    // end stream
-    try { res.end(); } catch {}
+    if (!sentDone) {
+      sseSend(res, JSON.stringify({ done: true }), 'done');
+      sentAny = true;
+      sentDone = true;
+    }
   } catch (err: any) {
     sseSend(res, JSON.stringify({ error: err?.message || 'stream error' }), 'error');
-    try { res.end(); } catch {}
+  } finally {
+    try {
+      res.end();
+    } catch {
+      // no-op
+    }
   }
+}
 
-});
+// Backward-compatible endpoints
+router.post('/', handleApeChat);
+router.post('/chat', handleApeChat);
 
 export default router;

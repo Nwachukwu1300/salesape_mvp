@@ -7,6 +7,7 @@ import React, { useState, useEffect } from "react";
 import { Card } from "./Card";
 import { Button } from "./Button";
 import { Loading } from "./Loading";
+import { getAccessToken } from "../lib/supabase";
 
 interface ScheduledPost {
   id: string;
@@ -25,24 +26,53 @@ interface CalendarData {
 export const ContentCalendar: React.FC<{ businessId: string }> = ({
   businessId,
 }) => {
+  const [resolvedBusinessId, setResolvedBusinessId] = useState<string>(businessId);
   const [month, setMonth] = useState(new Date());
   const [calendar, setCalendar] = useState<CalendarData>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const resolveBusinessId = async () => {
+      if (businessId) {
+        setResolvedBusinessId(businessId);
+        return;
+      }
+
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
+      const response = await fetch(`/businesses`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error("Failed to resolve business");
+      const businesses = await response.json();
+      const id = Array.isArray(businesses) ? businesses[0]?.id : undefined;
+      if (!id) throw new Error("No business found for this account");
+      setResolvedBusinessId(id);
+    };
+
+    resolveBusinessId().catch((err) => {
+      setError(err instanceof Error ? err.message : "Failed to resolve business");
+      setLoading(false);
+    });
+  }, [businessId]);
+
+  useEffect(() => {
+    if (!resolvedBusinessId) return;
     fetchCalendar();
-  }, [month, businessId]);
+  }, [month, resolvedBusinessId]);
 
   const fetchCalendar = async () => {
     try {
       setLoading(true);
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
       const monthStr = month.toISOString().split("T")[0];
       const response = await fetch(
-        `/api/businesses/${businessId}/schedule/calendar?month=${monthStr}`,
+        `/businesses/${resolvedBusinessId}/schedule/calendar?month=${monthStr}`,
         {
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${token}`,
           },
         },
       );
@@ -157,7 +187,7 @@ export const ContentCalendar: React.FC<{ businessId: string }> = ({
         </div>
       </Card>
 
-      <ScheduleStats businessId={businessId} />
+      <ScheduleStats businessId={resolvedBusinessId} />
     </div>
   );
 };
@@ -169,11 +199,13 @@ const ScheduleStats: React.FC<{ businessId: string }> = ({ businessId }) => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
+        const token = getAccessToken();
+        if (!token || !businessId) return;
         const response = await fetch(
-          `/api/businesses/${businessId}/schedule/stats`,
+          `/businesses/${businessId}/schedule/stats`,
           {
             headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
+              Authorization: `Bearer ${token}`,
             },
           },
         );

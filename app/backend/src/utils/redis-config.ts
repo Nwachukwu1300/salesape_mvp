@@ -106,8 +106,12 @@ export function getRedisConfig(): RedisConfig {
   // BullMQ and IORedis connection options
   config.connectTimeout = parseInt(process.env.REDIS_CONNECT_TIMEOUT || '5000');
   config.maxRetriesPerRequest = null; // Critical for BullMQ - disable auto-retry
+  // By default allow offline queueing so commands issued during transient
+  // reconnects are buffered. Can be overridden with `REDIS_ENABLE_OFFLINE_QUEUE=false`.
   config.enableReadyCheck = true; // Wait for Redis to be ready before processing
-  config.enableOfflineQueue = false; // Don't queue commands when disconnected
+  config.enableOfflineQueue = process.env.REDIS_ENABLE_OFFLINE_QUEUE
+    ? process.env.REDIS_ENABLE_OFFLINE_QUEUE === 'true'
+    : true;
 
   // BullMQ stall detection (job marked as failed if took too long)
   config.maxStalledCount = 2;
@@ -178,6 +182,8 @@ export function logRedisConfig() {
     db: config.db,
     passwordSet: !!config.password,
     connectTimeout: config.connectTimeout,
+    enableOfflineQueue: config.enableOfflineQueue,
+    usingTLS: Boolean(process.env.REDIS_TLS === 'true' || (process.env.REDIS_URL && String(process.env.REDIS_URL).startsWith('rediss://'))),
   });
 
   if (validation.errors.length > 0) {

@@ -311,7 +311,7 @@ function generateHeroHeadline(name: string, description: string): string {
 /**
  * Generate SEO keywords (minimum 5, maximum 20)
  */
-function generateSEOKeywords(name: string, description: string): string[] {
+export function generateSEOKeywords(name: string, description: string): string[] {
   const industry = detectIndustry(description, name);
   const keywords: string[] = [];
 

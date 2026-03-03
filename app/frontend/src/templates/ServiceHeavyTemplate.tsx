@@ -1,5 +1,6 @@
 import React from "react";
 import { WebsiteConfig } from "../types/website-config";
+import { ensureContrastForeground, getReadableTextColor } from "../lib/colorContrast";
 
 interface TemplateProps {
   config: WebsiteConfig;
@@ -21,6 +22,8 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
 }) => {
   const primaryColor = config.branding.colors[0] || "#3B82F6";
   const secondaryColor = config.branding.colors[1] || "#1E40AF";
+  const primaryOnWhite = ensureContrastForeground(primaryColor, "#ffffff");
+  const buttonTextOnPrimary = getReadableTextColor(primaryColor);
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -35,12 +38,12 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
 
   return (
     <div
-      className="min-h-screen"
+      className="min-h-screen overflow-x-hidden"
       style={{ fontFamily: config.branding.fontFamily || "Georgia, serif" }}
     >
       {/* Header Navigation */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-gray-200">
+        <div className="max-w-6xl mx-auto px-4 py-3 sm:py-4 flex items-center justify-between gap-3">
           {config.branding.logoUrl ? (
             <img
               src={config.branding.logoUrl}
@@ -49,7 +52,7 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
               loading="lazy"
             />
           ) : (
-            <span className="text-xl font-bold" style={{ color: primaryColor }}>
+            <span className="text-xl font-bold" style={{ color: primaryOnWhite }}>
               {config.meta.title.split("|")[0]}
             </span>
           )}
@@ -72,8 +75,8 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
           </nav>
           <a
             href={config.hero.ctaLink || "#contact"}
-            className="px-5 py-2 rounded-md text-white text-sm font-medium"
-            style={{ backgroundColor: primaryColor }}
+            className="px-3 sm:px-5 py-2 rounded-md text-white text-xs sm:text-sm font-medium"
+            style={{ backgroundColor: primaryColor, color: buttonTextOnPrimary }}
           >
             {config.hero.ctaText}
           </a>
@@ -81,9 +84,9 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
       </header>
 
       {/* Hero Section - Image Left Layout */}
-      <section id="hero" className="pt-24 pb-16 px-4 bg-gray-50">
+      <section id="hero" className="bg-gray-50 px-4 pb-14 pt-20 sm:pb-16 sm:pt-24">
         <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
+          <div className="grid items-center gap-8 md:grid-cols-2 md:gap-12">
             <div className="order-2 md:order-1">
               <img
                 src={config.hero.heroImage}
@@ -103,7 +106,7 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
                 <a
                   href={config.hero.ctaLink || "#contact"}
                   className="inline-block px-8 py-4 text-center font-semibold rounded-md text-white transition-colors"
-                  style={{ backgroundColor: primaryColor }}
+                  style={{ backgroundColor: primaryColor, color: buttonTextOnPrimary }}
                   onClick={(e) => {
                     if (config.hero.ctaLink === "#booking" && onBookingClick) {
                       e.preventDefault();
@@ -116,7 +119,7 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
                 <a
                   href="#services"
                   className="inline-block px-8 py-4 text-center font-semibold rounded-md border-2 transition-colors"
-                  style={{ borderColor: primaryColor, color: primaryColor }}
+                  style={{ borderColor: primaryOnWhite, color: primaryOnWhite }}
                 >
                   View Services
                 </a>
@@ -172,11 +175,11 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
               </p>
             )}
           </div>
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             {config.services.items.map((service, idx) => (
               <div
                 key={idx}
-                className="flex gap-6 p-6 rounded-lg border border-gray-200 hover:border-gray-300 hover:shadow-md transition-all"
+                className="flex flex-col gap-4 rounded-lg border border-gray-200 p-4 transition-all hover:border-gray-300 hover:shadow-md sm:flex-row sm:gap-6 sm:p-6"
               >
                 <div
                   className="w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -199,7 +202,7 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
                   {service.price && (
                     <p
                       className="mt-3 font-semibold"
-                      style={{ color: primaryColor }}
+                      style={{ color: primaryOnWhite }}
                     >
                       Starting at {service.price}
                     </p>
@@ -490,16 +493,16 @@ export const ServiceHeavyTemplate: React.FC<TemplateProps> = ({
       )}
 
       {/* Footer */}
-      <footer className="py-8 px-4 bg-gray-900 border-t border-gray-800">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-gray-500 text-sm">{config.footer.copyrightText}</p>
+      <footer className="bg-gray-900 border-t border-gray-800 px-4 py-8">
+        <div className="max-w-6xl mx-auto flex flex-col items-center justify-between gap-4 md:flex-row">
+          <p className="text-gray-300 text-sm">{config.footer.copyrightText}</p>
           {config.footer.quickLinks && (
-            <nav className="flex gap-6 text-sm">
+            <nav className="flex flex-wrap justify-center gap-4 text-sm sm:gap-6">
               {config.footer.quickLinks.map((link, idx) => (
                 <a
                   key={idx}
                   href={link.anchor}
-                  className="text-gray-500 hover:text-white transition-colors"
+                  className="text-gray-300 hover:text-white transition-colors"
                 >
                   {link.label}
                 </a>

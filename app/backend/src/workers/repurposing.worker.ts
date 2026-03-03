@@ -10,14 +10,130 @@
  * - Blog excerpts
  */
 
-import { Worker, Job } from 'bullmq';
-import { repurposingQueue, enqueueDistribution } from '../queues/index.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { Worker } from 'bullmq';
+import { enqueueDistribution } from '../queues/index.js';
 import type { RepurposingJob, DistributionJob } from '../queues/index.js';
 import { getRedisClient, createRedisClient } from '../utils/redis-client.js';
 import { createContextLogger } from '../utils/logger.js';
 import { storageService } from '../services/storage.service.js';
+import { createRepurposedContent } from '../services/repurposed-content.service.js';
+import { getContentInput, updateContentInputStatus } from '../services/content-input.service.js';
+import { repurposeContentWithAI } from '../utils/ai-repurposing.js';
+import { processVideo } from '../services/video-processor.service.js';
+import { renderShortFormVideo } from '../services/short-form-renderer.service.js';
+import { transformTranscriptToReels } from '../utils/content-repurposer.js';
+import { getTrendHooks } from '../utils/trend-hooks.js';
+import {
+  calculateClarity,
+  calculateHookStrength,
+  calculateNovelty,
+  calculatePacing,
+  calculatePlatformFit,
+  calculateWeightedScore,
+} from '../utils/content-scoring.js';
+import { getScoreWeightsForPlatform } from '../services/performance-feedback.service.js';
+import { getQueueProvider } from '../queues/provider.js';
+import { startRepurposingPgBossWorker } from '../queues/pgboss.js';
 
 const logger = createContextLogger('repurposing');
+
+type CutTimestamp = {
+  start: number;
+  end: number;
+  duration: number;
+};
+
+const VIDEO_PLATFORMS = new Set(['instagram', 'tiktok', 'youtube', 'linkedin']);
+
+function isVideoPlatform(platform: string): platform is 'instagram' | 'tiktok' | 'youtube' | 'linkedin' {
+  return VIDEO_PLATFORMS.has(platform);
+}
+
+function extractKeyMomentsFromTranscript(transcript: string): string[] {
+  if (!transcript) return [];
+  const sentences = transcript
+    .split(/[.!?]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 15);
+  return sentences.slice(0, 6);
+}
+
+function buildShotList(keyMoments: string[]): string[] {
+  if (keyMoments.length === 0) {
+    return ['Opening hook shot', 'Main message delivery', 'CTA close'];
+  }
+  return keyMoments.map((moment, index) => `Shot ${index + 1}: ${moment}`);
+}
+
+function buildBRollGuide(keyMoments: string[]): string[] {
+  if (keyMoments.length === 0) {
+    return ['B-roll: behind the scenes', 'B-roll: product close-up', 'B-roll: customer reaction'];
+  }
+  return keyMoments.map((moment) => `B-roll: Visuals that illustrate "${moment}"`);
+}
+
+function buildOnScreenText(keyMoments: string[]): string[] {
+  if (keyMoments.length === 0) {
+    return ['Key takeaway', 'Quick win', 'Call to action'];
+  }
+  return keyMoments.map((moment) => moment.slice(0, 60));
+}
+
+function buildCutTimestamps(videoDuration: number, clipDuration: number, count: number): CutTimestamp[] {
+  const safeDuration = Math.max(clipDuration, 5);
+  const maxStart = Math.max(videoDuration - safeDuration, 0);
+  const step = count > 1 ? maxStart / (count - 1) : 0;
+  const cuts: CutTimestamp[] = [];
+
+  for (let i = 0; i < count; i += 1) {
+    const start = Math.min(Math.round(step * i), Math.max(videoDuration - safeDuration, 0));
+    const end = Math.min(start + safeDuration, videoDuration);
+    cuts.push({ start, end, duration: Math.max(end - start, 1) });
+  }
+
+  return cuts;
+}
+
+async function downloadUrlToTemp(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok || !response.body) {
+    throw new Error(`Failed to download video from URL: ${url}`);
+  }
+
+  const fileName = `video-${Date.now()}.mp4`;
+  const filePath = path.join(os.tmpdir(), fileName);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(filePath, buffer);
+
+  return filePath;
+}
+
+async function resolveVideoSourcePath(contentInput: any): Promise<string | null> {
+  if (!contentInput) return null;
+  if (contentInput.storagePath) {
+    try {
+      const buffer = await storageService.downloadFile('VIDEOS', contentInput.storagePath);
+      const filePath = path.join(os.tmpdir(), `content-input-${contentInput.id}-${Date.now()}.mp4`);
+      fs.writeFileSync(filePath, buffer);
+      return filePath;
+    } catch (err) {
+      logger.warn('Failed to download video from storage', {
+        contentInputId: contentInput.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const urlCandidate = contentInput.url || contentInput.content;
+  if (urlCandidate && /^https?:\/\//i.test(urlCandidate)) {
+    return await downloadUrlToTemp(urlCandidate);
+  }
+
+  return null;
+}
 
 /**
  * Generate variants for Instagram Reels
@@ -435,17 +551,261 @@ async function generateVariants(
 /**
  * Process repurposing job
  */
-async function processRepurposing(job: Job<RepurposingJob>) {
-  const { contentId, businessId, originContent, targetFormats, style = 'educational', tone } = job.data;
+async function processRepurposingData(jobData: RepurposingJob, jobId?: string) {
+  const {
+    contentId,
+    businessId,
+    originContent,
+    targetFormats = [],
+    style = 'educational',
+    tone,
+    contentInputId,
+    platforms = [],
+    businessName,
+    businessContext,
+  } = jobData;
 
   try {
+    // Async Content Studio flow: generate DB-backed repurposed items from a content input.
+    if (contentInputId && platforms.length > 0) {
+      let sourceText = originContent || '';
+      const contentInput = await getContentInput(contentInputId);
+      sourceText = sourceText || contentInput?.content || contentInput?.url || '';
+
+      if (!contentInput) {
+        throw new Error('Content input not found for repurposing');
+      }
+
+      if (contentInput.type === 'video') {
+        const created = [];
+        const videoSourcePath = await resolveVideoSourcePath(contentInput);
+        const metadata = typeof contentInput.metadata === 'string'
+          ? { businessCategory: 'business' }
+          : (contentInput.metadata || {});
+        const businessCategory = metadata?.businessCategory || 'business';
+
+        let transcript = sourceText;
+        let videoDuration = 60;
+        let summary = '';
+        let keyMoments: string[] = [];
+
+        if (videoSourcePath) {
+          try {
+            const videoInfo = await processVideo(videoSourcePath);
+            transcript = videoInfo.transcript || transcript;
+            videoDuration = videoInfo.metadata?.duration || videoDuration;
+            summary = videoInfo.summary || '';
+            keyMoments = extractKeyMomentsFromTranscript(videoInfo.transcript || '');
+          } catch (err) {
+            logger.warn('Video processing failed, falling back to transcript only', {
+              contentInputId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
+        if (!transcript) {
+          transcript = 'Transcript unavailable for this video.';
+        }
+
+        const reelCandidates = await transformTranscriptToReels(transcript, businessCategory);
+        const clipDurations: Record<string, number> = {
+          instagram: 45,
+          tiktok: 30,
+          youtube: 60,
+          linkedin: 45,
+        };
+
+        const filteredPlatforms = platforms.filter((platform) => isVideoPlatform(platform));
+        const expandedTargets = filteredPlatforms.map((platform) => ({
+          platform,
+          variantIndex: 0,
+        }));
+        const cuts = buildCutTimestamps(
+          videoDuration,
+          45,
+          Math.max(expandedTargets.length, 1)
+        );
+
+        for (let index = 0; index < expandedTargets.length; index += 1) {
+          const target = expandedTargets[index];
+          if (!target) continue;
+          const { platform, variantIndex } = target;
+          const platformDuration = clipDurations[platform] ?? 45;
+          const base = reelCandidates.find((reel) => reel.platform === platform) || reelCandidates[0];
+          const duration = Math.min(platformDuration, videoDuration || platformDuration);
+          const hook = base?.hook || 'Watch this';
+          const script = base?.script || transcript.slice(0, 200);
+          const caption = base?.caption || script;
+          const hashtags = base?.hashtags || [];
+          const cut = cuts[index] || { start: 0, end: duration, duration };
+
+          let assetPath: string | null = null;
+          let assetUrl: string | null = null;
+          let renderError: string | null = null;
+
+          if (videoSourcePath) {
+            try {
+              const rendered = await renderShortFormVideo({
+                inputPath: videoSourcePath,
+                startSeconds: cut.start,
+                durationSeconds: cut.duration,
+                platform,
+              });
+              const buffer = fs.readFileSync(rendered.outputPath);
+              const fileName = `repurposing/${contentInputId}/${platform}-${variantIndex + 1}-${Date.now()}.mp4`;
+              const upload = await storageService.uploadFile('ASSETS', fileName, buffer, {
+                contentType: 'video/mp4',
+              });
+              assetPath = upload.path;
+              assetUrl = upload.publicUrl;
+              try {
+                fs.unlinkSync(rendered.outputPath);
+              } catch {
+                // ignore cleanup errors
+              }
+            } catch (err) {
+              renderError = err instanceof Error ? err.message : String(err);
+            }
+          }
+
+          const trendHooks = getTrendHooks(platform).map((hookItem) => hookItem.hook);
+          const weights = await getScoreWeightsForPlatform(businessId, platform);
+          const breakdown = {
+            hookStrength: calculateHookStrength(hook),
+            pacing: calculatePacing(script, duration, platform),
+            clarity: calculateClarity(script),
+            platformFit: calculatePlatformFit(platform, hook, caption, hashtags),
+            novelty: calculateNovelty(script),
+          };
+          const weightedScore = calculateWeightedScore(breakdown, weights);
+
+          const row: any = {
+            businessId,
+            contentInputId,
+            platform,
+            content: script,
+            caption,
+            hashtags,
+            assetUrl,
+            assetPath,
+            score: weightedScore,
+            scoreBreakdown: { ...breakdown, weightedScore },
+            trendHooks,
+            metadata: {
+              summary,
+              keyMoments,
+              shotList: buildShotList(keyMoments),
+              bRollGuide: buildBRollGuide(keyMoments),
+              onScreenText: buildOnScreenText(keyMoments),
+              cutTimestamps: cut,
+              hook,
+              duration,
+              variantIndex: variantIndex + 1,
+              renderError,
+            },
+            status: 'draft',
+          };
+
+          const repurposed = await createRepurposedContent(row);
+          created.push(repurposed);
+        }
+
+        if (videoSourcePath) {
+          try {
+            fs.unlinkSync(videoSourcePath);
+          } catch {
+            // ignore cleanup errors
+          }
+        }
+
+        await updateContentInputStatus(contentInputId, created.length > 0 ? 'ready' : 'failed');
+
+        return {
+          success: created.length > 0,
+          mode: 'content-input',
+          contentInputId,
+          createdCount: created.length,
+        };
+      }
+
+      if (!sourceText) {
+        throw new Error('No source content available for repurposing');
+      }
+
+      const created = [];
+      for (const platform of platforms) {
+        try {
+          const platformKey = platform as 'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'linkedin' | 'facebook';
+          const platformContent = await repurposeContentWithAI(
+            sourceText,
+            platformKey,
+            businessName || 'Business',
+            businessContext
+          );
+
+          const hook = platformContent?.caption
+            ? String(platformContent.caption).split('\n')[0] || ''
+            : String(platformContent.content || '').slice(0, 80);
+          const script = String(platformContent.content || '');
+          const caption = platformContent.caption || script;
+          const hashtags = platformContent.hashtags || [];
+          const trendHooks = getTrendHooks(platformKey).map((hookItem) => hookItem.hook);
+          const weights = await getScoreWeightsForPlatform(businessId, platformKey);
+          const breakdown = {
+            hookStrength: calculateHookStrength(hook),
+            pacing: calculatePacing(script, 45, platformKey),
+            clarity: calculateClarity(script),
+            platformFit: calculatePlatformFit(platformKey, hook, caption, hashtags),
+            novelty: calculateNovelty(script),
+          };
+          const weightedScore = calculateWeightedScore(breakdown, weights);
+
+          const row: any = {
+            businessId,
+            contentInputId,
+            platform,
+            content: script,
+            caption,
+            hashtags,
+            score: weightedScore,
+            scoreBreakdown: { ...breakdown, weightedScore },
+            trendHooks,
+            status: 'draft',
+          };
+
+          const repurposed = await createRepurposedContent(row);
+          created.push(repurposed);
+        } catch (err) {
+          logger.warn('Failed to repurpose platform in async flow', {
+            platform,
+            contentInputId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      await updateContentInputStatus(contentInputId, created.length > 0 ? 'ready' : 'failed');
+
+      return {
+        success: created.length > 0,
+        mode: 'content-input',
+        contentInputId,
+        createdCount: created.length,
+      };
+    }
+
     logger.info('Processing content repurposing', {
-      jobId: job.id,
+      jobId,
       contentId,
       businessId,
       formatCount: targetFormats.length,
       style,
     });
+
+    if (!originContent) {
+      throw new Error('originContent is required for legacy repurposing jobs');
+    }
 
     // Generate variants
     const variants = await generateVariants(originContent, targetFormats, style);
@@ -469,7 +829,7 @@ async function processRepurposing(job: Job<RepurposingJob>) {
     }
 
     logger.info('Content repurposing completed', {
-      jobId: job.id,
+      jobId,
       contentId,
       variantCount: Object.keys(variants).length,
     });
@@ -505,8 +865,19 @@ async function processRepurposing(job: Job<RepurposingJob>) {
       storagePaths,
     };
   } catch (error) {
+    if (contentInputId) {
+      try {
+        await updateContentInputStatus(contentInputId, 'failed');
+      } catch (updateErr) {
+        logger.warn('Failed to mark content input as failed', {
+          contentInputId,
+          error: updateErr instanceof Error ? updateErr.message : String(updateErr),
+        });
+      }
+    }
+
     logger.error('Repurposing job failed', {
-      jobId: job.id,
+      jobId,
       contentId,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -519,13 +890,23 @@ async function processRepurposing(job: Job<RepurposingJob>) {
  * Start repurposing worker
  */
 export async function startRepurposingWorker() {
+  const provider = getQueueProvider();
+
+  if (provider === 'pgboss') {
+    const worker = await startRepurposingPgBossWorker(async (jobData, jobId) => {
+      await processRepurposingData(jobData, jobId);
+    });
+    logger.info('Repurposing worker started', { provider: 'pgboss' });
+    return worker as any;
+  }
+
   // Use the shared Redis client singleton
   createRedisClient();
 
   const worker = new Worker<RepurposingJob>(
     'repurposing',
     async (job) => {
-      return await processRepurposing(job);
+      return await processRepurposingData(job.data, String(job.id));
     },
     {
       connection: getRedisClient(),
@@ -560,7 +941,7 @@ export async function startRepurposingWorker() {
     });
   });
 
-  logger.info('Repurposing worker started', { concurrency: 5 });
+  logger.info('Repurposing worker started', { concurrency: 5, provider: 'bullmq' });
 
   return worker;
 }

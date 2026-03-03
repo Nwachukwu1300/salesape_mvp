@@ -1,24 +1,34 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router";
 import { Logo } from "../components/Logo";
 import { Button } from "../components/Button";
-import { Input } from "../components/Input";
-import { Card, CardHeader, CardContent } from "../components/Card";
+import { Card, CardContent, CardHeader } from "../components/Card";
 import { ProgressCircle } from "../components/ProgressCircle";
+import { Badge } from "../components/Badge";
+import { ThemeToggle } from "../components/ThemeToggle";
+import { API_BASE } from "../lib/api";
+import { toast } from "sonner";
 import {
-  ArrowRight,
-  Search,
+  Activity,
   AlertCircle,
+  ArrowRight,
   CheckCircle,
-  TrendingUp,
-  Zap,
+  Gauge,
+  Globe,
+  LineChart,
+  MonitorSmartphone,
+  Search,
   Shield,
-  Eye,
+  Smartphone,
+  Sparkles,
+  Star,
+  TrendingUp,
+  XCircle,
+  Zap,
 } from "lucide-react";
 
-const API_BASE = (
-  (import.meta.env as any).VITE_API_URL || "http://localhost:3001"
-).replace(/\/+$/g, "");
+type Severity = "critical" | "warning" | "info";
+type Impact = "high" | "medium" | "low";
 
 interface AuditResult {
   id: string;
@@ -29,497 +39,279 @@ interface AuditResult {
   mobileScore: number;
   issues: string[];
   recommendations: string[];
-  createdAt: string;
+}
+
+function inferSeverity(text: string, idx: number): Severity {
+  const t = text.toLowerCase();
+  if (t.includes("missing") || t.includes("broken") || t.includes("error") || t.includes("failed")) return "critical";
+  if (t.includes("slow") || t.includes("improve") || t.includes("warning") || t.includes("optimiz")) return "warning";
+  return idx === 0 ? "critical" : idx < 3 ? "warning" : "info";
+}
+
+function severityToImpact(severity: Severity): Impact {
+  if (severity === "critical") return "high";
+  if (severity === "warning") return "medium";
+  return "low";
 }
 
 export function PublicAudit() {
   const navigate = useNavigate();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [website, setWebsite] = useState("");
+  const apiBase =
+    API_BASE ||
+    (typeof window !== "undefined"
+      ? `http://${window.location.hostname}:3001`
+      : "http://localhost:3001");
+  const [formData, setFormData] = useState({ fullName: "", email: "", company: "", websiteUrl: "" });
   const [isAuditing, setIsAuditing] = useState(false);
-  const [auditResults, setAuditResults] = useState<AuditResult | null>(null);
+  const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
   const [error, setError] = useState("");
-  const [isFirstVisit, setIsFirstVisit] = useState(false);
 
-  // Check if first visit using localStorage (client-side)
-  useEffect(() => {
-    const hasVisitedPublicAudit = localStorage.getItem("visited-public-audit");
-    if (!hasVisitedPublicAudit) {
-      setIsFirstVisit(true);
-      localStorage.setItem("visited-public-audit", "true");
+  const normalizeWebsiteUrl = (raw: string): string | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    try {
+      const parsed = new URL(normalized);
+      if (!parsed.hostname || !parsed.hostname.includes(".")) return null;
+      return normalized;
+    } catch {
+      return null;
     }
-  }, []);
+  };
 
-  const handleRunAudit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!name.trim()) {
-      setError("Please enter your name");
-      return;
-    }
-
-    if (!email.trim()) {
-      setError("Please enter your email address");
-      return;
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError("Please enter a valid email address");
-      return;
-    }
-
-    if (!website.trim()) {
-      setError("Please enter a website URL");
-      return;
+    setError("");
+    if (!formData.fullName.trim()) return setError("Please enter your full name.");
+    if (!formData.email.trim()) return setError("Please enter your email address.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) return setError("Please enter a valid email address.");
+    if (!formData.company.trim()) return setError("Please enter your company name.");
+    const normalizedWebsite = normalizeWebsiteUrl(formData.websiteUrl);
+    if (!normalizedWebsite) {
+      return setError("Enter a valid website (example: firstbank.com or https://firstbank.com).");
     }
 
     setIsAuditing(true);
-    setError("");
-
     try {
-      const normalizedUrl = website.trim().match(/^https?:\/\//)
-        ? website.trim()
-        : `https://${website.trim()}`;
-
-      const response = await fetch(`${API_BASE}/seo-audit-public`, {
+      const response = await fetch(`${apiBase}/seo-audit-public`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          website: normalizedUrl,
-          email: email.trim(),
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ website: normalizedWebsite, email: formData.email.trim() }),
       });
-
       if (!response.ok) {
-        if (response.status === 429) {
-          setError(
-            "You can run one free audit per week. Please try again next week.",
-          );
-        } else {
-          try {
-            const errorData = await response.json();
-            setError(errorData.error || "Failed to run audit");
-          } catch {
-            setError(`Error: ${response.statusText}`);
-          }
+        if (response.status === 429) setError("You can run one free audit per week. Please try again next week.");
+        else {
+          const body = await response.json().catch(() => ({}));
+          setError(body?.error || "Failed to run audit.");
         }
-        setIsAuditing(false);
         return;
       }
-
-      const data: AuditResult = await response.json();
-      setAuditResults(data);
+      const result = (await response.json()) as AuditResult;
+      setAuditResult(result);
+      toast.success("Audit completed successfully.");
+      setTimeout(() => document.getElementById("audit-results")?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
     } catch (err) {
-      console.error("Audit error:", err);
-      setError("Failed to run audit. Please try again.");
+      setError(err instanceof Error ? err.message : "Failed to run audit. Please try again.");
     } finally {
       setIsAuditing(false);
     }
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return "text-green-600";
-    if (score >= 60) return "text-yellow-600";
-    return "text-red-600";
-  };
+  const overallScore = auditResult?.overallScore ?? 0;
+  const scoreColor = overallScore >= 90 ? "#10b981" : overallScore >= 70 ? "#f59e0b" : "#ef4444";
+  const scoreLabel = overallScore >= 90 ? "Excellent" : overallScore >= 70 ? "Good" : overallScore >= 50 ? "Needs Work" : "Poor";
 
-  const getScoreBgColor = (score: number) => {
-    if (score >= 80) return "bg-green-100";
-    if (score >= 60) return "bg-yellow-100";
-    return "bg-red-100";
-  };
+  const technicalIssues = (auditResult?.issues || []).map((issue, index) => ({ severity: inferSeverity(issue, index), title: issue }));
+  const mobileIssues = (auditResult?.issues || []).slice(0, 4).map((issue, i) => ({ title: issue, impact: severityToImpact(inferSeverity(issue, i)) }));
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
-      {/* Header */}
-      <header className="border-b border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <Logo />
-          <div className="flex items-center gap-4">
-            <Button onClick={() => navigate("/")} variant="outline" size="sm">
-              Sign In
-            </Button>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
+      <header className="bg-white/85 dark:bg-gray-800/85 border-b border-gray-200 dark:border-gray-700 backdrop-blur-sm sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
+          <Logo size="md" />
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
+            <Button variant="outline" onClick={() => navigate("/")}>Sign In</Button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        {!auditResults ? (
-          <>
-            {/* Hero Section */}
-            <section className="mb-8 sm:mb-16 text-center px-4 sm:px-0">
-              <h1
-                className={`text-3xl sm:text-4xl md:text-5xl font-bold text-slate-900 dark:text-white mb-3 sm:mb-4 leading-tight ${isFirstVisit ? "animate-bounce" : ""}`}
-              >
-                Free SEO Audit
-              </h1>
-              <p className="text-base sm:text-lg md:text-xl text-slate-600 dark:text-slate-400 mb-6 sm:mb-8 max-w-2xl mx-auto leading-relaxed">
-                Get instant insights into your website's SEO, performance, and
-                mobile readiness. No credit card needed.
-              </p>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-500">
-                Free audit per week
-              </p>
-            </section>
-
-            {/* Audit Form */}
-            <div
-              className={`max-w-2xl mx-auto mb-8 sm:mb-16 px-4 sm:px-0 ${isFirstVisit ? "animate-bounce" : ""}`}
-              style={isFirstVisit ? { animationDelay: "0.1s" } : {}}
-            >
-              <Card className="border-2 border-slate-200 dark:border-slate-800">
-                <CardHeader>
-                  <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Search className="w-6 h-6 text-blue-600" />
-                    Analyze Your Website
-                  </h2>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={handleRunAudit} className="space-y-6">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                        Your Name
-                      </label>
-                      <Input
-                        type="text"
-                        placeholder="John Smith"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        disabled={isAuditing}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                        Your Email
-                      </label>
-                      <Input
-                        type="email"
-                        placeholder="you@example.com"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        disabled={isAuditing}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                        Website URL
-                      </label>
-                      <Input
-                        type="text"
-                        placeholder="example.com or https://example.com"
-                        value={website}
-                        onChange={(e) => setWebsite(e.target.value)}
-                        disabled={isAuditing}
-                      />
-                    </div>
-
-                    {error && (
-                      <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4 flex gap-3">
-                        <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                        <p className="text-sm text-red-700 dark:text-red-300">
-                          {error}
-                        </p>
-                      </div>
-                    )}
-
-                    <Button
-                      type="submit"
-                      disabled={isAuditing}
-                      className="w-full"
-                    >
-                      {isAuditing ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          Running Audit...
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <Zap className="w-4 h-4" />
-                          Run Free Audit
-                        </div>
-                      )}
-                    </Button>
-                  </form>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Benefits Section */}
-            <section className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 lg:gap-8 max-w-5xl mx-auto px-4 sm:px-0">
-              <Card
-                className={`text-center h-full ${isFirstVisit ? "animate-bounce" : ""}`}
-                style={isFirstVisit ? { animationDelay: "0.2s" } : {}}
-              >
-                <CardContent className="pt-4 sm:pt-6 flex flex-col h-full">
-                  <Eye className="w-10 sm:w-12 h-10 sm:h-12 mx-auto mb-3 sm:mb-4 text-blue-600 flex-shrink-0" />
-                  <h3 className="font-semibold text-slate-900 dark:text-white mb-2 text-sm sm:text-base">
-                    Performance Analysis
-                  </h3>
-                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 flex-grow">
-                    Get detailed insights into your website's loading speed and
-                    performance metrics.
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card
-                className={`text-center h-full ${isFirstVisit ? "animate-bounce" : ""}`}
-                style={isFirstVisit ? { animationDelay: "0.3s" } : {}}
-              >
-                <CardContent className="pt-4 sm:pt-6 flex flex-col h-full">
-                  <TrendingUp className="w-10 sm:w-12 h-10 sm:h-12 mx-auto mb-3 sm:mb-4 text-green-600 flex-shrink-0" />
-                  <h3 className="font-semibold text-slate-900 dark:text-white mb-2 text-sm sm:text-base">
-                    SEO Optimization
-                  </h3>
-                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 flex-grow">
-                    Discover SEO opportunities and recommendations to improve
-                    your search rankings.
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card
-                className={`text-center h-full ${isFirstVisit ? "animate-bounce" : ""}`}
-                style={isFirstVisit ? { animationDelay: "0.4s" } : {}}
-              >
-                <CardContent className="pt-4 sm:pt-6 flex flex-col h-full">
-                  <Shield className="w-10 sm:w-12 h-10 sm:h-12 mx-auto mb-3 sm:mb-4 text-purple-600 flex-shrink-0" />
-                  <h3 className="font-semibold text-slate-900 dark:text-white mb-2 text-sm sm:text-base">
-                    Mobile Readiness
-                  </h3>
-                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 flex-grow">
-                    Ensure your site is optimized for mobile devices and
-                    provides great UX.
-                  </p>
-                </CardContent>
-              </Card>
-            </section>
-          </>
-        ) : (
-          <>
-            {/* Results Header */}
-            <div className="mb-8">
-              <Button
-                onClick={() => {
-                  setAuditResults(null);
-                  setWebsite("");
-                  setEmail("");
-                  setError("");
-                }}
-                variant="outline"
-                size="sm"
-              >
-                ← Run Another Audit
-              </Button>
-            </div>
-
-            {/* Results */}
-            <section className="max-w-4xl mx-auto">
-              <div className="mb-8">
-                <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">
-                  Audit Results for{" "}
-                  <code className="text-blue-600 break-all">
-                    {auditResults.url}
-                  </code>
-                </h2>
-                <p className="text-slate-600 dark:text-slate-400">
-                  Analysis completed on{" "}
-                  {new Date(auditResults.createdAt).toLocaleDateString()}
-                </p>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
+        {!auditResult && (
+          <div className="space-y-6">
+            <div className="text-center">
+              <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 mb-3 border border-fuchsia-200 dark:border-fuchsia-900" style={{ backgroundColor: "#f4f0e5" }}>
+                <Sparkles className="w-4 h-4" style={{ color: "#f724de" }} />
+                <span className="text-sm font-medium text-gray-900">Free Website Audit</span>
               </div>
+              <h1 className="text-2xl md:text-4xl font-bold text-gray-900 dark:text-white mb-3">Discover How Your Website <span style={{ color: "#f724de" }}>Actually Performs</span></h1>
+              <p className="text-base text-gray-600 dark:text-gray-400 max-w-3xl mx-auto">Get technical SEO, performance, and mobile diagnostics with real backend data.</p>
+            </div>
 
-              {/* Overall Score Card */}
-              <Card className="border-2 border-blue-200 dark:border-blue-900 mb-8 bg-gradient-to-br from-blue-50 to-slate-50 dark:from-blue-950 dark:to-slate-900">
-                <CardContent className="pt-6 sm:pt-8">
-                  <div className="flex flex-col md:flex-row items-center justify-between gap-6 sm:gap-8">
-                    <div className="text-center flex-shrink-0">
-                      <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-2 sm:mb-3">
-                        Overall Score
-                      </p>
-                      <div className="flex justify-center mb-2 px-2">
-                        <ProgressCircle
-                          value={auditResults.overallScore}
-                          size={120}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex-1 space-y-4 w-full md:w-auto px-2 sm:px-0">
-                      <p className="text-base sm:text-lg font-semibold text-slate-900 dark:text-white">
-                        Your website is performing
-                        <span
-                          className={`ml-2 ${getScoreColor(auditResults.overallScore)} font-bold`}
-                        >
-                          {auditResults.overallScore >= 80
-                            ? "Excellent"
-                            : auditResults.overallScore >= 60
-                              ? "Good"
-                              : "Needs Improvement"}
-                        </span>
-                      </p>
-                      <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400">
-                        {auditResults.overallScore >= 80
-                          ? "Your website is well-optimized! Keep maintaining these high standards."
-                          : auditResults.overallScore >= 60
-                            ? "Your website is performing well, but there's room for improvement."
-                            : "Your website needs some attention. Focus on the recommendations below."}
-                      </p>
+            <Card className="shadow-xl">
+              <CardContent className="p-4 md:p-5">
+                <form onSubmit={handleSubmit} noValidate className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                    <input
+                      className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 text-sm"
+                      placeholder="Full Name"
+                      value={formData.fullName}
+                      onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                      required
+                    />
+                    <input
+                      type="email"
+                      className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 text-sm"
+                      placeholder="Email Address"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      required
+                    />
+                    <input
+                      className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 text-sm"
+                      placeholder="Company Name"
+                      value={formData.company}
+                      onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                      required
+                    />
+                    <input
+                      type="text"
+                      inputMode="url"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      className="h-10 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 text-sm"
+                      placeholder="https://yourwebsite.com"
+                      value={formData.websiteUrl}
+                      onChange={(e) => setFormData({ ...formData, websiteUrl: e.target.value })}
+                      required
+                    />
+                    <Button type="submit" variant="primary" className="h-10 w-full" disabled={isAuditing}>
+                      {isAuditing ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Analyzing...</> : <><Search className="w-4 h-4" />Run Audit</>}
+                    </Button>
+                  </div>
+                  {isAuditing && (
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      Audit in progress (can take up to ~2 min). Live PageSpeed data is being fetched.
+                    </p>
+                  )}
+                  {error && <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-950 dark:border-red-800 p-2 text-sm text-red-700 dark:text-red-300 flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5" />{error}</div>}
+                </form>
+              </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-lg border border-fuchsia-200/70 dark:border-fuchsia-900/50 bg-white/80 dark:bg-gray-900/70 p-4 text-center">
+                <Activity className="w-5 h-5 mx-auto text-fuchsia-600 mb-2" />
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">Technical SEO Scan</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Metadata, structure and crawl issues.</p>
+              </div>
+              <div className="rounded-lg border border-fuchsia-200/70 dark:border-fuchsia-900/50 bg-white/80 dark:bg-gray-900/70 p-4 text-center">
+                <LineChart className="w-5 h-5 mx-auto text-cyan-600 mb-2" />
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">Performance Overview</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Core speed and quality scores.</p>
+              </div>
+              <div className="rounded-lg border border-fuchsia-200/70 dark:border-fuchsia-900/50 bg-white/80 dark:bg-gray-900/70 p-4 text-center">
+                <MonitorSmartphone className="w-5 h-5 mx-auto text-amber-600 mb-2" />
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">Mobile UX Snapshot</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Phone usability blockers.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {auditResult && (
+          <div id="audit-results" className="space-y-6">
+            <Card className="border-2" style={{ backgroundColor: "#f4f0e5", borderColor: "#f724de" }}>
+              <CardContent className="py-10">
+                <div className="text-center mb-6">
+                  <h2 className="text-3xl font-bold text-gray-900">Audit Complete for {formData.company}</h2>
+                  <p className="text-gray-700 break-all">{auditResult.url}</p>
+                </div>
+                <div className="flex flex-col items-center gap-4">
+                  <div className="w-36 h-36 rounded-full border-[10px] border-gray-200 relative flex items-center justify-center">
+                    <div className="absolute inset-0 rounded-full" style={{ boxShadow: `inset 0 0 0 10px ${scoreColor}` }} />
+                    <div className="text-center">
+                      <div className="text-4xl font-bold text-gray-900">{overallScore}</div>
+                      <div className="text-xs text-gray-600">/100</div>
                     </div>
                   </div>
+                  <Badge variant="info" style={{ backgroundColor: scoreColor, color: "white", border: "none" }}>{scoreLabel} Overall Performance</Badge>
+                </div>
+                <div className="grid md:grid-cols-3 gap-5 mt-8">
+                  <ProgressCircle value={auditResult.seoScore} label="Technical SEO" />
+                  <ProgressCircle value={auditResult.performanceScore} label="Performance" />
+                  <ProgressCircle value={auditResult.mobileScore} label="Mobile Experience" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid lg:grid-cols-3 gap-6">
+              <Card>
+                <CardHeader><h3 className="font-bold text-lg flex items-center gap-2"><Globe className="w-5 h-5 text-fuchsia-500" />SEO Issues</h3></CardHeader>
+                <CardContent className="space-y-3">
+                  {technicalIssues.slice(0, 6).map((issue, index) => (
+                    <div key={index} className="text-sm flex gap-2">
+                      {issue.severity === "critical" ? <XCircle className="w-4 h-4 text-red-500 mt-0.5" /> : <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5" />}
+                      <span>{issue.title}</span>
+                    </div>
+                  ))}
                 </CardContent>
               </Card>
-
-              {/* Detailed Scores */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
-                <Card>
-                  <CardContent className="pt-4 sm:pt-6">
-                    <div className="text-center">
-                      <p className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 mb-2 sm:mb-3">
-                        SEO Score
-                      </p>
-                      <div className="flex justify-center px-2">
-                        <ProgressCircle
-                          value={auditResults.seoScore}
-                          size={100}
-                        />
-                      </div>
-                      <p
-                        className={`mt-2 text-xs sm:text-sm font-semibold ${getScoreColor(auditResults.seoScore)}`}
-                      >
-                        {auditResults.seoScore}/100
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardContent className="pt-4 sm:pt-6">
-                    <div className="text-center">
-                      <p className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 mb-2 sm:mb-3">
-                        Performance
-                      </p>
-                      <div className="flex justify-center px-2">
-                        <ProgressCircle
-                          value={auditResults.performanceScore}
-                          size={100}
-                        />
-                      </div>
-                      <p
-                        className={`mt-2 text-xs sm:text-sm font-semibold ${getScoreColor(auditResults.performanceScore)}`}
-                      >
-                        {auditResults.performanceScore}/100
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="sm:col-span-2 lg:col-span-1">
-                  <CardContent className="pt-4 sm:pt-6">
-                    <div className="text-center">
-                      <p className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 mb-2 sm:mb-3">
-                        Mobile Score
-                      </p>
-                      <div className="flex justify-center px-2">
-                        <ProgressCircle
-                          value={auditResults.mobileScore}
-                          size={100}
-                        />
-                      </div>
-                      <p
-                        className={`mt-2 text-xs sm:text-sm font-semibold ${getScoreColor(auditResults.mobileScore)}`}
-                      >
-                        {auditResults.mobileScore}/100
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Issues */}
-              {auditResults.issues && auditResults.issues.length > 0 && (
-                <Card className="mb-8 border-red-200 dark:border-red-900">
-                  <CardHeader>
-                    <h3 className="text-lg font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
-                      <AlertCircle className="w-5 h-5" />
-                      Issues Found ({auditResults.issues.length})
-                    </h3>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2">
-                      {auditResults.issues.map((issue, idx) => (
-                        <li key={idx} className="flex gap-3">
-                          <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-1" />
-                          <span className="text-sm text-slate-700 dark:text-slate-300">
-                            {issue}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Recommendations */}
-              {auditResults.recommendations &&
-                auditResults.recommendations.length > 0 && (
-                  <Card className="mb-8 border-green-200 dark:border-green-900">
-                    <CardHeader>
-                      <h3 className="text-lg font-bold text-green-600 dark:text-green-400 flex items-center gap-2">
-                        <CheckCircle className="w-5 h-5" />
-                        Recommendations ({auditResults.recommendations.length})
-                      </h3>
-                    </CardHeader>
-                    <CardContent>
-                      <ul className="space-y-3">
-                        {auditResults.recommendations.map((rec, idx) => (
-                          <li key={idx} className="flex gap-3">
-                            <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-1" />
-                            <span className="text-sm text-slate-700 dark:text-slate-300">
-                              {rec}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                )}
-
-              {/* CTA to Sign Up */}
-              <Card className="bg-gradient-to-r from-blue-600 to-purple-600 border-0">
-                <CardContent className="pt-8 text-center">
-                  <h3 className="text-2xl font-bold text-white mb-2">
-                    Create My Better Website
-                  </h3>
-                  <p className="text-blue-100 mb-6 max-w-2xl mx-auto">
-                    Sign up for SalesAPE to implement these recommendations
-                    automatically and generate a high-converting website powered
-                    by AI.
-                  </p>
-                  <Button
-                    onClick={() => navigate("/")}
-                    className="bg-white text-blue-600 hover:bg-slate-50 font-semibold"
-                  >
-                    <div className="flex items-center gap-2">
-                      Get Started Free
-                      <ArrowRight className="w-4 h-4" />
-                    </div>
-                  </Button>
+              <Card>
+                <CardHeader><h3 className="font-bold text-lg flex items-center gap-2"><Gauge className="w-5 h-5 text-fuchsia-500" />Performance</h3></CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  <div className="flex justify-between"><span>Performance Score</span><span className="font-semibold">{auditResult.performanceScore}/100</span></div>
+                  <div className="flex justify-between"><span>SEO Score</span><span className="font-semibold">{auditResult.seoScore}/100</span></div>
+                  <div className="flex justify-between"><span>Mobile Score</span><span className="font-semibold">{auditResult.mobileScore}/100</span></div>
                 </CardContent>
               </Card>
-            </section>
-          </>
+              <Card>
+                <CardHeader><h3 className="font-bold text-lg flex items-center gap-2"><Smartphone className="w-5 h-5 text-fuchsia-500" />Mobile Issues</h3></CardHeader>
+                <CardContent className="space-y-3">
+                  {mobileIssues.map((issue, index) => (
+                    <div key={index} className="text-sm">
+                      <span className="font-semibold capitalize">{issue.impact}: </span>{issue.title}
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
+
+            {auditResult.recommendations?.length > 0 && (
+              <Card>
+                <CardHeader><h3 className="font-bold text-lg flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-600" />Priority Recommendations</h3></CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  {auditResult.recommendations.slice(0, 8).map((r, i) => <div key={i} className="flex gap-2"><CheckCircle className="w-4 h-4 text-green-600 mt-0.5" /><span>{r}</span></div>)}
+                </CardContent>
+              </Card>
+            )}
+
+            <Card className="border-2" style={{ backgroundColor: "#f4f0e5", borderColor: "#f724de" }}>
+              <CardContent className="py-10 text-center">
+                <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5" style={{ backgroundColor: "#f724de" }}>
+                  <Sparkles className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="text-3xl font-bold text-gray-900 mb-3">Ready to Fix These Issues?</h3>
+                <p className="text-lg text-gray-700 mb-6 max-w-2xl mx-auto">Let SalesAPE build an optimized website with stronger SEO, faster load speed and better mobile UX.</p>
+                <div className="flex flex-col sm:flex-row justify-center gap-3">
+                  <Button variant="primary" size="lg" onClick={() => navigate("/create-website")}><Zap className="w-5 h-5" />Create My Optimized Website<ArrowRight className="w-5 h-5" /></Button>
+                  <Button variant="outline" size="lg" onClick={() => navigate("/")}>Sign Up Free</Button>
+                </div>
+                <div className="mt-6 text-sm text-gray-600 flex justify-center gap-6">
+                  <span className="flex items-center gap-2"><Star className="w-4 h-4 text-fuchsia-500" />No credit card required</span>
+                  <span className="flex items-center gap-2"><TrendingUp className="w-4 h-4 text-fuchsia-500" />Faster launch</span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-200 dark:border-slate-800 mt-16 py-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm text-slate-600 dark:text-slate-400">
-          <p>© 2026 SalesAPE. All rights reserved.</p>
+      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center text-sm text-gray-600 dark:text-gray-400">
+          <p>© 2026 SalesAPE.ai. All rights reserved.</p>
+          <p className="mt-2">Powered by SalesAPE.ai</p>
         </div>
       </footer>
     </div>

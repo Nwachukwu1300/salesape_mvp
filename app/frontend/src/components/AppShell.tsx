@@ -1,68 +1,114 @@
 // src/components/AppShell.tsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
 import { SidebarNav } from "./SidebarNav";
-import { Menu } from "lucide-react";
-import { Toaster } from './ui/sonner';
+import { Menu, X } from "lucide-react";
+import { Toaster } from "./ui/sonner";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
   const location = useLocation();
 
-  const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const raw = window.localStorage.getItem("salesape.desktopSidebarOpen");
+    return raw === null ? true : raw === "true";
+  });
+  const [isMobileViewport, setIsMobileViewport] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 639px)").matches : false
+  );
 
-  const authPaths = ["/", "/login", "/register", "/onboarding"];
-  if (!user || authPaths.some((p) => location.pathname.startsWith(p))) {
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 640px)");
+    const closeMobileSidebarOnDesktop = (e: MediaQueryListEvent) => {
+      if (e.matches) setMobileOpen(false);
+    };
+
+    if (mediaQuery.matches) setMobileOpen(false);
+    mediaQuery.addEventListener("change", closeMobileSidebarOnDesktop);
+    return () => mediaQuery.removeEventListener("change", closeMobileSidebarOnDesktop);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("salesape.desktopSidebarOpen", String(desktopSidebarOpen));
+  }, [desktopSidebarOpen]);
+
+  useEffect(() => {
+    const mobileQuery = window.matchMedia("(max-width: 639px)");
+    const updateViewport = (e: MediaQueryListEvent) => setIsMobileViewport(e.matches);
+
+    setIsMobileViewport(mobileQuery.matches);
+    mobileQuery.addEventListener("change", updateViewport);
+    return () => mobileQuery.removeEventListener("change", updateViewport);
+  }, []);
+
+  const chromeHiddenPaths = new Set(["/", "/login", "/register", "/audit"]);
+  if (chromeHiddenPaths.has(location.pathname)) {
     return <>{children}</>;
   }
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
-      {/* Sidebar */}
-      <div
-        className={`
-          ${mobileOpen ? "block" : "hidden"} 
-          sm:block
-        `}
-      >
-        <SidebarNav
-          collapsed={collapsed}
-          setCollapsed={setCollapsed}
-        />
-      </div>
+    <div className="flex h-dvh w-full overflow-x-hidden bg-gray-50 dark:bg-gray-950">
+      {/* Desktop Sidebar */}
+      {!isMobileViewport && desktopSidebarOpen && (
+        <div className="w-64 shrink-0">
+          <div className="sticky top-0 h-dvh">
+            <SidebarNav
+              onNavigate={() => setMobileOpen(false)}
+              onToggleCollapse={() => setDesktopSidebarOpen(false)}
+            />
+          </div>
+        </div>
+      )}
 
-      {/* Mobile Overlay */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 z-30 sm:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
+      {/* Mobile Sidebar */}
+      {isMobileViewport && mobileOpen && (
+        <>
+          <div className="fixed inset-y-0 left-0 z-50 w-full max-w-sm">
+            <SidebarNav collapsed={false} onNavigate={() => setMobileOpen(false)} />
+          </div>
+          <div
+            className="fixed inset-0 bg-transparent z-40"
+            onClick={() => setMobileOpen(false)}
+          />
+        </>
       )}
 
       {/* Main Area */}
-      <div className="flex-1 flex flex-col">
-        {/* Top Bar */}
-        <header className="h-14 flex items-center px-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Sidebar toggle */}
+        {(isMobileViewport || !desktopSidebarOpen) && (
           <button
-            onClick={() => setMobileOpen(true)}
-            className="sm:hidden p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
+            onClick={() => {
+              if (isMobileViewport) {
+                setMobileOpen((prev) => !prev);
+              } else {
+                setDesktopSidebarOpen(true);
+              }
+            }}
+            className="fixed top-4 left-4 z-50 p-2 rounded-lg bg-white/90 dark:bg-gray-900/90 border border-gray-200 dark:border-gray-800 shadow-sm hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            aria-label={isMobileViewport ? (mobileOpen ? "Close menu" : "Open menu") : "Open sidebar"}
           >
-            <Menu className="w-5 h-5" />
+            {isMobileViewport && mobileOpen ? (
+              <X className="w-5 h-5" />
+            ) : (
+              <Menu className="w-5 h-5" />
+            )}
           </button>
+        )}
 
-          {/* Collapse toggle for desktop */}
-          <button
-            onClick={() => setCollapsed((prev) => !prev)}
-            className="hidden sm:block ml-2 p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-        </header>
+        {/* Dedicated theme dock */}
+        <div
+          className="fixed top-4 right-4 z-50 flex items-center gap-2 rounded-xl border border-gray-200 bg-white/90 p-2 shadow-sm dark:border-gray-800 dark:bg-gray-900/90"
+          aria-label="Theme controls"
+        >
+          <ThemeToggle />
+        </div>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto pt-16">
           {children}
         </main>
         <Toaster />

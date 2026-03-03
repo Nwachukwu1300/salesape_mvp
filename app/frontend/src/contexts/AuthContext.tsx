@@ -72,8 +72,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const token = getAccessToken();
       if (token) {
         const payload = parseJwt(token);
-        if (payload?.sub && payload.email) {
-          setUser({ id: payload.sub, email: payload.email, full_name: payload.full_name });
+        if (payload?.sub) {
+          const email =
+            payload.email || payload.user_metadata?.email || `${payload.sub}@local.test`;
+          setUser({ id: payload.sub, email, full_name: payload.full_name });
           resetInactivityTimer();
         } else {
           setAccessToken(null);
@@ -110,8 +112,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const payload = parseJwt(token);
       if (!payload?.sub) throw new Error("Invalid token payload");
-
-      setUser({ id: payload.sub, email: payload.email, full_name: payload.full_name });
+      const resolvedEmail =
+        payload.email || payload.user_metadata?.email || `${payload.sub}@local.test`;
+      setUser({ id: payload.sub, email: resolvedEmail, full_name: payload.full_name });
       resetInactivityTimer();
     } finally {
       setLoading(false);
@@ -128,7 +131,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!token) throw new Error("No token received after sign-up");
 
       const payload = parseJwt(token);
-      setUser({ id: payload?.sub!, email: payload?.email!, full_name: fullName });
+      const resolvedEmail =
+        payload?.email || payload?.user_metadata?.email || `${payload?.sub}@local.test`;
+      setUser({ id: payload?.sub!, email: resolvedEmail!, full_name: fullName });
       resetInactivityTimer();
     } finally {
       setLoading(false);

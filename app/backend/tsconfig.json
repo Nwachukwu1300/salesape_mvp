@@ -9,7 +9,7 @@
     // See also https://aka.ms/tsconfig/module
     "module": "nodenext",
     "target": "esnext",
-    "types": ["node", "express", "cors", "nodemailer", "node-fetch", "cheerio"],
+    "types": ["node", "express", "cors", "nodemailer", "node-fetch"],
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     // For nodejs:

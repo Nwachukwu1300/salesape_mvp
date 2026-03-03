@@ -1,5 +1,6 @@
 import http from 'http';
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import apeChatRouter from '../routes/apeChat.js';
 
 /**
@@ -53,6 +54,7 @@ describe('Streaming Integration Tests - Real GPT-5-mini + Redis', () => {
   let app: express.Application;
   let server: http.Server;
   const PORT = 3001;
+  let authToken = '';
 
   beforeAll((done) => {
     // Verify environment
@@ -60,9 +62,25 @@ describe('Streaming Integration Tests - Real GPT-5-mini + Redis', () => {
       throw new Error('OPENAI_API_KEY is required for integration tests');
     }
 
+    const secret = process.env.JWT_SECRET || 'test-secret-key-not-for-production';
+    authToken = jwt.sign({ userId: 'integration-test-user' }, secret, { expiresIn: '1h' });
+
     // Create Express app
     app = express();
     app.use(express.json());
+    app.use((req, _res, next) => {
+      const header = req.headers.authorization || '';
+      const token = header.replace(/^Bearer\s+/i, '');
+      if (token) {
+        try {
+          const decoded: any = jwt.verify(token, secret);
+          (req as any).userId = decoded?.userId;
+        } catch {
+          // ignore invalid tokens
+        }
+      }
+      next();
+    });
     app.use('/api/ape/chat', apeChatRouter);
 
     // Start server
@@ -116,6 +134,7 @@ describe('Streaming Integration Tests - Real GPT-5-mini + Redis', () => {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(postData),
           'Accept': 'text/event-stream',
+          'Authorization': `Bearer ${authToken}`,
         },
       };
 
@@ -179,6 +198,7 @@ describe('Streaming Integration Tests - Real GPT-5-mini + Redis', () => {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(postData),
           'Accept': 'text/event-stream',
+          'Authorization': `Bearer ${authToken}`,
         },
       };
 
@@ -254,6 +274,7 @@ describe('Streaming Integration Tests - Real GPT-5-mini + Redis', () => {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(postData),
           'Accept': 'text/event-stream',
+          'Authorization': `Bearer ${authToken}`,
         },
       };
 
@@ -303,13 +324,18 @@ describe('Streaming Integration Tests - Real GPT-5-mini + Redis', () => {
       req.end();
 
       // Timeout after 15 seconds
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         if (aborted) {
           resolve();
         } else {
           reject(new Error('Abort test timed out'));
         }
       }, 15000);
+
+      // Ensure timeout doesn't keep the event loop alive
+      if (typeof timeoutId === 'object' && timeoutId && 'unref' in timeoutId) {
+        (timeoutId as NodeJS.Timeout).unref();
+      }
     });
   }, 30000);
 
@@ -326,6 +352,7 @@ describe('Streaming Integration Tests - Real GPT-5-mini + Redis', () => {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(postData),
           'Accept': 'text/event-stream',
+          'Authorization': `Bearer ${authToken}`,
         },
       };
 
@@ -342,7 +369,7 @@ describe('Streaming Integration Tests - Real GPT-5-mini + Redis', () => {
             try {
               const response = JSON.parse(data);
               expect(response.error).toBeDefined();
-              expect(response.error).toContain('userId and query required');
+              expect(response.error).toContain('query required');
               console.log('✓ Validation error returned correctly');
               resolve();
             } catch (e) {
@@ -375,7 +402,8 @@ describe('Streaming Integration Tests - Real GPT-5-mini + Redis', () => {
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(postData),
-          // No Accept: text/event-stream header — non-streaming
+          'Authorization': `Bearer ${authToken}`,
+          // No Accept: text/event-stream header â€” non-streaming
         },
       };
 

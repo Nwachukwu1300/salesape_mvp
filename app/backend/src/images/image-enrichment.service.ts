@@ -109,7 +109,7 @@ export function extractImagesFromHtml(html: string, baseUrl?: string): string[] 
   const $ = cheerio.load(html);
   const images: string[] = [];
 
-  $('img').each((_i, el) => {
+  $('img').each((_i: number, el: any) => {
     let src = $(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src');
 
     if (!src) return;
@@ -152,7 +152,7 @@ export function extractImagesFromHtml(html: string, baseUrl?: string): string[] 
   });
 
   // Also look for background images in style attributes
-  $('[style*="background"]').each((_i, el) => {
+  $('[style*="background"]').each((_i: number, el: any) => {
     const style = $(el).attr('style') || '';
     const urlMatch = style.match(/url\(['"]?([^'")\s]+)['"]?\)/);
     if (urlMatch && urlMatch[1]) {

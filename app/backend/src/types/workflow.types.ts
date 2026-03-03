@@ -77,6 +77,10 @@ export interface CreateContentInputInput {
 }
 
 export interface UpdateContentInputInput {
+  title?: string;
+  content?: string;
+  url?: string;
+  storagePath?: string;
   status?: ContentInputStatus;
   metadata?: Record<string, any>;
 }
@@ -93,6 +97,13 @@ export interface RepurposedContent {
   content: string;
   caption?: string;
   hashtags?: string[];
+  assetUrl?: string;
+  assetPath?: string;
+  score?: number;
+  scoreBreakdown?: Record<string, any>;
+  trendHooks?: string[];
+  performance?: Record<string, any>;
+  metadata?: Record<string, any>;
   status: RepurposedContentStatus;
   publishedAt?: Date;
   createdAt: Date;
@@ -106,6 +117,13 @@ export interface CreateRepurposedContentInput {
   content: string;
   caption?: string;
   hashtags?: string[];
+  assetUrl?: string;
+  assetPath?: string;
+  score?: number;
+  scoreBreakdown?: Record<string, any>;
+  trendHooks?: string[];
+  performance?: Record<string, any>;
+  metadata?: Record<string, any>;
   status?: RepurposedContentStatus;
 }
 
@@ -114,6 +132,13 @@ export interface UpdateRepurposedContentInput {
   content?: string;
   caption?: string;
   hashtags?: string[];
+  assetUrl?: string;
+  assetPath?: string;
+  score?: number;
+  scoreBreakdown?: Record<string, any>;
+  trendHooks?: string[];
+  performance?: Record<string, any>;
+  metadata?: Record<string, any>;
 }
 
 // ===== PlatformDistribution =====

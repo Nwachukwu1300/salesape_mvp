@@ -1,15 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, AlertCircle, ArrowLeft } from "lucide-react";
-import { SidebarNav } from "../components/SidebarNav";
 import { useAuth } from "../contexts/AuthContext";
 import { startConversation } from "../lib/api";
+import { Button } from "../components/Button";
 
 export function CreateWebsite() {
   const navigate = useNavigate();
   const { user, loading: authLoading, getToken } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
+  const startedRef = useRef(false);
+  const [lastBackendError, setLastBackendError] = useState<string>("");
 
   useEffect(() => {
     // If auth is still loading, don't do anything yet
@@ -27,7 +29,8 @@ export function CreateWebsite() {
     }
 
     // Auth is ready and we have a user - start conversation
-    if (user) {
+    if (user && !startedRef.current) {
+      startedRef.current = true;
       initConversation();
     }
   }, [user, authLoading]);
@@ -35,42 +38,16 @@ export function CreateWebsite() {
   const initConversation = async () => {
     try {
       setIsInitializing(true);
+      setError(null);
+      setLastBackendError("");
 
-      // Check for valid token
       const token = getToken();
       if (!token) {
-        setError("Authentication token not found. Please log in again.");
-        setTimeout(() => navigate("/login"), 2000);
-        return;
+        console.warn("Authentication token missing; attempting conversation anyway.");
       }
 
-      console.log(
-        "Starting conversation with token:",
-        token.substring(0, 20) + "...",
-      );
-
-      // Call the conversation start API with timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
-      const response = await fetch("http://localhost:3001/conversation/start", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({}),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `API error: ${response.status}`);
-      }
-
-      const data = await response.json();
+      // use shared API client; it applies baseURL/proxy and adds auth header
+      const data = await startConversation();
       console.log("Conversation started:", data);
 
       if (data?.sessionId) {
@@ -83,7 +60,7 @@ export function CreateWebsite() {
           extracted: data.extracted || {},
           isComplete: data.isComplete || false,
           questionNumber: data.questionNumber || 1,
-          totalQuestions: data.totalQuestions || 10,
+          totalQuestions: data.totalQuestions || 7,
         };
         sessionStorage.setItem(
           `conv_${data.sessionId}`,
@@ -97,21 +74,41 @@ export function CreateWebsite() {
       }
     } catch (err: any) {
       console.error("Error starting conversation:", err);
+      let backendMsg = "";
       let errorMsg = "Failed to start conversation";
+
+      if (typeof err === "string") {
+        backendMsg = err.trim();
+      } else if (err && typeof err === "object" && typeof err.toString === "function") {
+        const raw = err.toString();
+        if (raw && raw !== "[object Object]" && !raw.startsWith("Error:")) {
+          backendMsg = raw;
+        }
+      }
 
       if (err.name === "AbortError") {
         errorMsg =
           "Request timeout - server took too long to respond. Please try again.";
-      } else if (err?.response?.data?.message) {
-        errorMsg = err.response.data.message;
-      } else if (err?.response?.data?.error) {
-        errorMsg = err.response.data.error;
-      } else if (err?.message) {
-        errorMsg = err.message;
+      } else if (!backendMsg && typeof err?.message === "string" && err.message.trim()) {
+        backendMsg = err.message.trim();
+      } else if (!backendMsg && typeof err?.error === "string" && err.error.trim()) {
+        backendMsg = err.error.trim();
+      } else if (!backendMsg && typeof err?.details === "string" && err.details.trim()) {
+        backendMsg = err.details.trim();
+      } else if (!backendMsg && err?.response?.data?.message) {
+        backendMsg = String(err.response.data.message);
+      } else if (!backendMsg && err?.response?.data?.error) {
+        backendMsg = String(err.response.data.error);
+      } else if (!backendMsg && err?.message) {
+        backendMsg = String(err.message);
       }
 
-      setError(`Error: ${errorMsg}. Please try again.`);
-      setTimeout(() => navigate("/dashboard"), 3000);
+      if (backendMsg) {
+        setLastBackendError(backendMsg);
+        setError(`Could not start your conversation. ${backendMsg}`);
+      } else {
+        setError(`Could not start your conversation. ${errorMsg}`);
+      }
     } finally {
       setIsInitializing(false);
     }
@@ -147,8 +144,6 @@ export function CreateWebsite() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
-      <SidebarNav currentPath="/create-website" />
-
       <div className="text-center">
         {error ? (
           <div className="max-w-md">
@@ -158,6 +153,25 @@ export function CreateWebsite() {
                 <p className="text-sm text-red-700 dark:text-red-300">
                   {error}
                 </p>
+                {lastBackendError ? (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-2">
+                    Backend: {lastBackendError}
+                  </p>
+                ) : null}
+                <div className="mt-3 flex gap-2">
+                  <Button
+                    onClick={() => {
+                      startedRef.current = false;
+                      initConversation();
+                    }}
+                    size="sm"
+                  >
+                    Retry
+                  </Button>
+                  <Button onClick={() => navigate("/dashboard")} variant="outline" size="sm">
+                    Back to Dashboard
+                  </Button>
+                </div>
               </div>
             </div>
           </div>

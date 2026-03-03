@@ -28,6 +28,10 @@ interface BusinessIntelligence {
  */
 export declare function generateBusinessIntelligence(scraped: ScrapedData, conversationalInput?: string): Promise<BusinessIntelligence>;
 /**
+ * Generate SEO keywords (minimum 5, maximum 20)
+ */
+export declare function generateSEOKeywords(name: string, description: string): string[];
+/**
  * Generate lead score based on engagement and source
  */
 export declare function calculateLeadScore(lead: {

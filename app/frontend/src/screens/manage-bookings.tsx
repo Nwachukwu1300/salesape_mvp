@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { getAccessToken } from "../lib/supabase";
+import { API_BASE } from "../lib/api";
 import { Logo } from "../components/Logo";
 import { Button } from "../components/Button";
 import { Card, CardHeader, CardContent } from "../components/Card";
@@ -33,6 +34,11 @@ interface Booking {
 export function ManageBookings() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const apiBase =
+    API_BASE ||
+    (typeof window !== "undefined"
+      ? `http://${window.location.hostname}:3001`
+      : "http://localhost:3001");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -55,7 +61,7 @@ export function ManageBookings() {
 
         // First, fetch all businesses
         const businessesResponse = await fetch(
-          "http://localhost:3001/businesses",
+          `${apiBase}/businesses`,
           {
             headers: { Authorization: `Bearer ${token}` },
           },
@@ -72,7 +78,7 @@ export function ManageBookings() {
         for (const business of businesses) {
           try {
             const bookingsResponse = await fetch(
-              `http://localhost:3001/businesses/${business.id}/bookings`,
+              `${apiBase}/businesses/${business.id}/bookings`,
               { headers: { Authorization: `Bearer ${token}` } },
             );
 
@@ -125,7 +131,7 @@ export function ManageBookings() {
       if (!booking) return;
 
       const response = await fetch(
-        `http://localhost:3001/businesses/${booking.businessId}/bookings/${deleteBookingId}`,
+        `${apiBase}/businesses/${booking.businessId}/bookings/${deleteBookingId}`,
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },

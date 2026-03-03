@@ -14,13 +14,91 @@ let singleton: any = null;
 export function createRedisClient(): any {
   if (singleton) return singleton;
 
+  // Quick dev bypass: if workers/Redis should be skipped, return a noop in-memory stub
+  if (process.env.REDIS_SKIP_WORKERS === 'true') {
+    // Minimal stub implementing commonly used methods to avoid runtime errors
+    const stub: any = {
+      _isStub: true,
+      on: (_ev: string, _cb: any) => {},
+      once: (_ev: string, _cb: any) => {},
+      quit: async () => {},
+      disconnect: () => {},
+      set: async (_k: string, _v: any, ..._args: any[]) => 'OK',
+      get: async (_k: string) => null,
+      del: async (_k: string) => 0,
+      zadd: async (_k: string, ..._args: any[]) => 0,
+      xadd: async (_k: string, ..._args: any[]) => '0-0',
+      lpush: async (_k: string, ..._args: any[]) => 0,
+      rpush: async (_k: string, ..._args: any[]) => 0,
+      publish: async (_ch: string, _msg: string) => 0,
+    };
+    singleton = stub;
+    // eslint-disable-next-line no-console
+    console.log('[redis-client] REDIS_SKIP_WORKERS=true — using in-memory stub Redis client');
+    return singleton;
+  }
+
   const cfg = getRedisConfig() as any;
 
   // Support both CJS and ESM shapes of ioredis package
   const IORedis: any = (Redis as any)?.default ?? Redis;
 
   // Construct ioredis client
-  singleton = new IORedis(cfg as any);
+  // If using Redis Cloud / TLS endpoint, enable TLS options. Also merge
+  // higher-level connection options provided by `getRedisConfig()`.
+  const opts: any = { ...(cfg || {}) };
+
+  const hostLooksLikeCloud = typeof opts.host === 'string' && opts.host.includes('.redis');
+
+  // Respect explicit REDIS_TLS setting if provided; otherwise infer from URL or host
+  let wantTls: boolean;
+  if (typeof process.env.REDIS_TLS !== 'undefined') {
+    wantTls = process.env.REDIS_TLS === 'true';
+  } else if (process.env.REDIS_URL && String(process.env.REDIS_URL).startsWith('rediss://')) {
+    wantTls = true;
+  } else {
+    wantTls = hostLooksLikeCloud;
+  }
+
+  if (wantTls) {
+    opts.tls = opts.tls ?? {};
+    // Ensure SNI (server name) is set so OpenSSL uses the correct hostname
+    // for TLS negotiation. Some cloud Redis providers require SNI.
+    if (!opts.tls.servername && opts.host) {
+      opts.tls.servername = opts.host;
+    }
+  }
+
+  // If TLS is explicitly not wanted, ensure no tls option is present
+  if (!wantTls && opts.tls) {
+    delete opts.tls;
+  }
+
+  // Log the options used to construct the ioredis client for debugging
+  // Print to console so we can always see the values during startup
+  // (logger may filter info level in some environments)
+  // eslint-disable-next-line no-console
+  console.log('[redis-client] constructing ioredis with options:', {
+    host: opts.host,
+    port: opts.port,
+    passwordSet: !!opts.password,
+    enableOfflineQueue: opts.enableOfflineQueue,
+    enableReadyCheck: opts.enableReadyCheck,
+    connectTimeout: opts.connectTimeout,
+    tls: opts.tls ? true : false,
+  });
+
+  logger.info('Redis client options', {
+    host: opts.host,
+    port: opts.port,
+    passwordSet: !!opts.password,
+    enableOfflineQueue: opts.enableOfflineQueue,
+    enableReadyCheck: opts.enableReadyCheck,
+    connectTimeout: opts.connectTimeout,
+    tls: opts.tls ? true : false,
+  });
+
+  singleton = new IORedis(opts as any);
 
   singleton.on('error', (err: any) => {
     logger.error('Redis error', { message: err instanceof Error ? err.message : String(err) });

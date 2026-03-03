@@ -2,13 +2,12 @@ import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { getAccessToken } from "../lib/supabase";
+import { API_BASE as SHARED_API_BASE } from "../lib/api";
 import { Logo } from "../components/Logo";
 import { Button } from "../components/Button";
 import { Card, CardContent } from "../components/Card";
 import { Badge } from "../components/Badge";
 import {
-  ArrowLeft,
-  Eye,
   Edit3,
   ExternalLink,
   Smartphone,
@@ -20,6 +19,9 @@ import {
   Settings,
 } from "lucide-react";
 import { CalendarIntegrationModal } from "../components/CalendarIntegrationModal";
+import { WebsiteRenderer } from "../components/WebsiteRenderer";
+import { ensureContrastForeground } from "../lib/colorContrast";
+import type { WebsiteConfig } from "../types/website-config";
 
 export function WebsitePreview() {
   const navigate = useNavigate();
@@ -36,11 +38,20 @@ export function WebsitePreview() {
     address: "",
   });
   const [publishing, setPublishing] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenMode, setRegenMode] = useState<"sync" | "async">("sync");
   const [availableTemplates, setAvailableTemplates] = useState<any[]>([]);
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [branding, setBranding] = useState<any | null>(null);
   const [desiredFeatures, setDesiredFeatures] = useState<string[]>([]);
+  const [websiteConfig, setWebsiteConfig] = useState<WebsiteConfig | null>(null);
+  const [configLoading, setConfigLoading] = useState(true);
+  const [savingInlineEdits, setSavingInlineEdits] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [showTestimonialForm, setShowTestimonialForm] = useState(false);
+  const [brandingColors, setBrandingColors] = useState<string[]>(["", "", ""]);
+  const [sidebarWidth, setSidebarWidth] = useState(192);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [newTestimonial, setNewTestimonial] = useState({
     clientName: "",
     clientTitle: "",
@@ -50,9 +61,11 @@ export function WebsitePreview() {
   });
   const [loadingTestimonial, setLoadingTestimonial] = useState(false);
 
-  const API_BASE = (
-    (import.meta.env as any).VITE_API_URL || "http://localhost:3001"
-  ).replace(/\/+$/g, "");
+  const API_BASE =
+    SHARED_API_BASE ||
+    (typeof window !== "undefined"
+      ? `http://${window.location.hostname}:3001`
+      : "http://localhost:3001");
 
   // Helper to check if a feature was selected
   const hasFeature = (feature: string) =>
@@ -71,23 +84,141 @@ export function WebsitePreview() {
       font: "system-ui, -apple-system, sans-serif",
       headingFont: "system-ui, -apple-system, sans-serif",
     };
-    return tpl?.style ? { ...defaultStyle, ...tpl.style } : defaultStyle;
+    const merged = tpl?.style ? { ...defaultStyle, ...tpl.style } : defaultStyle;
+    return {
+      ...merged,
+      textColor: ensureContrastForeground(merged.textColor, merged.bgColor, 4.5),
+      tertiary: ensureContrastForeground(merged.tertiary, merged.bgColor, 3),
+      accent: ensureContrastForeground(merged.accent, merged.bgColor, 2.5),
+    };
+  };
+
+  const mapUiTemplateToEngine = (uiTemplateId?: string | null) => {
+    switch (uiTemplateId) {
+      case "creative":
+      case "bold":
+        return "image-heavy";
+      case "minimal":
+      case "sleek":
+        return "luxury";
+      case "modern":
+      default:
+        return "service-heavy";
+    }
+  };
+
+  const applyTemplateAndRegenerate = async (uiTemplate: any, forceDifferent = false) => {
+    if (!id) return;
+    const token = getAccessToken();
+    const selectedEngineTemplate = mapUiTemplateToEngine(uiTemplate?.id);
+    const currentEngineTemplate = websiteConfig?.templateId || mapUiTemplateToEngine(template?.id);
+
+    const payload: Record<string, any> = {
+      templateId: selectedEngineTemplate,
+      variationSeed: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    };
+
+    if (forceDifferent && currentEngineTemplate) {
+      payload.excludeTemplateId = currentEngineTemplate;
+    }
+
+    const res = await fetch(`${API_BASE}/businesses/${id}/generate-config`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error || "Failed to generate config");
+    }
+    const data = await res.json();
+    if (data?.config) {
+      setWebsiteConfig(data.config as WebsiteConfig);
+      if (data?.config?.branding?.colors?.length) {
+        const colors = [...data.config.branding.colors];
+        while (colors.length < 3) colors.push("");
+        setBrandingColors(colors.slice(0, 3));
+      }
+    }
+    if (uiTemplate) setTemplate(uiTemplate);
+  };
+
+  const persistGeneratedConfig = async (nextConfig: WebsiteConfig) => {
+    if (!id) return;
+    setSavingInlineEdits(true);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE}/businesses/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ generatedConfig: nextConfig }),
+      });
+      if (!res.ok) throw new Error("Failed to save website edits");
+    } catch (err) {
+      console.error(err);
+      toast.info("Failed to save inline edit");
+    } finally {
+      setSavingInlineEdits(false);
+    }
+  };
+
+  const uploadPreviewImage = async (file: File): Promise<string> => {
+    if (!id) throw new Error("Business ID not found");
+    const token = getAccessToken();
+    const dataBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read image file"));
+      reader.readAsDataURL(file);
+    });
+
+    const res = await fetch(`${API_BASE}/businesses/${id}/assets/upload-image`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        fileName: file.name || `image-${Date.now()}.png`,
+        mimeType: file.type || "image/png",
+        dataBase64,
+      }),
+    });
+
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(payload?.error || "Failed to upload image");
+    }
+    if (!payload?.url) {
+      throw new Error("Image uploaded but URL was not returned");
+    }
+    return payload.url as string;
   };
 
   useEffect(() => {
     async function load() {
       if (!id) return;
       try {
+        setConfigLoading(true);
         const token = getAccessToken();
         console.log("🔍 Fetching business & templates...");
         console.log("Token present:", !!token);
         console.log("Business ID:", id);
 
-        const [bizRes, tplRes] = await Promise.all([
+        const [bizRes, tplRes, configRes] = await Promise.all([
           fetch(`${API_BASE}/businesses/${id}`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
           fetch(`${API_BASE}/businesses/${id}/template`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+          fetch(`${API_BASE}/businesses/${id}/website-config`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
         ]);
@@ -138,16 +269,64 @@ export function WebsitePreview() {
           const errText = await tplRes.text();
           console.error("Error response:", errText);
         }
+
+        if (configRes.ok) {
+          const configPayload = await configRes.json();
+          const nextConfig = (configPayload?.config as WebsiteConfig) || null;
+          setWebsiteConfig(nextConfig);
+          if (nextConfig?.branding?.colors?.length) {
+            const colors = [...nextConfig.branding.colors];
+            while (colors.length < 3) colors.push("");
+            setBrandingColors(colors.slice(0, 3));
+          }
+        } else {
+          setWebsiteConfig(null);
+        }
+        setConfigLoading(false);
       } catch (err) {
         console.error("❌ Fetch error:", err);
+        setWebsiteConfig(null);
+        setConfigLoading(false);
       }
     }
     load();
   }, [id]);
+
+  useEffect(() => {
+    // Treat only true phone widths as stacked layout.
+    const media = window.matchMedia("(max-width: 639px)");
+    const sync = (matches: boolean) => setIsMobileViewport(matches);
+    sync(media.matches);
+    const onChange = (e: MediaQueryListEvent) => sync(e.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (isMobileViewport || !isResizingSidebar) return;
+
+    const onMove = (event: MouseEvent) => {
+      const minWidth = 160;
+      const maxWidth = 320;
+      const nextWidth = Math.max(minWidth, Math.min(maxWidth, event.clientX));
+      setSidebarWidth(nextWidth);
+    };
+    const onUp = () => setIsResizingSidebar(false);
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [isResizingSidebar, isMobileViewport]);
+
+  const shellIsMobile = isMobileViewport;
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen overflow-x-hidden bg-gray-50 dark:bg-gray-900">
       {/* Header */}
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+      <header className="sticky top-0 z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-6">
@@ -157,113 +336,156 @@ export function WebsitePreview() {
                 <Badge variant="success">Live</Badge>
                 <span>•</span>
                 <span>
-                  {business?.publishedUrl || "your-website.salesape.ai/web"}
+                  {business?.publishedUrl || `${window.location.origin}/live/${id || ""}`}
                 </span>
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                <span>Regenerate:</span>
+                <div className="flex rounded-full border border-gray-200 dark:border-gray-700 overflow-hidden">
+                  <button
+                    type="button"
+                    className={`px-3 py-1 ${regenMode === "sync" ? "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white" : "bg-transparent"}`}
+                    onClick={() => setRegenMode("sync")}
+                  >
+                    Quick
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-3 py-1 ${regenMode === "async" ? "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white" : "bg-transparent"}`}
+                    onClick={() => setRegenMode("async")}
+                  >
+                    Full (async)
+                  </button>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  if (!id) return toast.info("Business ID not found");
+                  try {
+                    setRegenerating(true);
+                    const token = getAccessToken();
+                    if (regenMode === "async") {
+                      navigate(`/generating/${id}`);
+                      return;
+                    }
+
+                    await fetch(`${API_BASE}/businesses/${id}/enrich-images`, {
+                      method: "POST",
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                      },
+                    }).catch(() => null);
+
+                    await applyTemplateAndRegenerate(template, true);
+                    toast.info("Website regenerated.");
+                  } catch (err: any) {
+                    toast.info(err?.message || "Failed to regenerate website");
+                  } finally {
+                    setRegenerating(false);
+                  }
+                }}
+                disabled={regenerating}
+              >
+                {regenerating ? "Regenerating..." : "Regenerate"}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
                 className="hidden sm:flex"
                 onClick={() => {
-                  const url = business?.publishedUrl;
-                  if (url) {
-                    window.open(url, "_blank");
-                  } else {
-                    toast.info(
-                      'This site is not yet published. Click the "Publish Site" button in the sidebar to make it live on the web.',
-                    );
-                  }
+                  const url = `${window.location.origin}/live/${id || ""}`;
+                  window.open(url, "_blank");
                 }}
               >
                 <ExternalLink className="w-4 h-4" />
                 <span className="hidden lg:inline">View Live</span>
-              </Button>
-              {/* Dev Preview Button - Will be removed in production */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="hidden sm:flex text-xs"
-                style={{ borderColor: "#f724de", color: "#f724de" }}
-                onClick={() => {
-                  if (!id) return toast.info("Business ID not found");
-                  const devUrl = `http://localhost:3001/public/business?id=${id}`;
-                  window.open(devUrl, "_blank");
-                }}
-                title="Development preview - will be removed later"
-              >
-                <Eye className="w-4 h-4" />
-                <span className="hidden lg:inline text-xs">(DEV) Preview</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate("/dashboard")}
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span className="hidden sm:inline">Dashboard</span>
               </Button>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="flex">
+      <div className={shellIsMobile ? "flex flex-col" : "flex flex-row"}>
         {/* Sidebar */}
-        <aside className="w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 min-h-[calc(100vh-73px)] overflow-y-auto">
-          <div className="p-6">
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-6">
+        <aside
+          className={
+            shellIsMobile
+              ? "w-full bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 overflow-y-auto"
+              : "flex-none bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 min-h-[calc(100vh-73px)] sticky top-[73px] h-[calc(100vh-73px)] overflow-y-auto"
+          }
+          style={
+            shellIsMobile
+              ? undefined
+              : {
+                  width: `${sidebarWidth}px`,
+                  minWidth: `${sidebarWidth}px`,
+                  maxWidth: `${sidebarWidth}px`,
+                }
+          }
+        >
+          <div className="p-4">
+            <h2 className="text-sm font-bold text-gray-900 dark:text-white mb-3">
               Preview Settings
             </h2>
 
             {/* View Controls */}
-            <div className="mb-6">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">
-                Preview Mode
-              </label>
+            <div className="mb-4">
               <div className="flex gap-2">
                 <Button
                   variant={viewMode === "desktop" ? "primary" : "outline"}
                   size="sm"
                   onClick={() => setViewMode("desktop")}
-                  className="flex-1"
+                  className="flex-1 h-6 px-1 text-[10px]"
                 >
-                  <Monitor className="w-4 h-4" />
+                  <Monitor className="w-3 h-3" />
                   Desktop
                 </Button>
                 <Button
                   variant={viewMode === "mobile" ? "primary" : "outline"}
                   size="sm"
                   onClick={() => setViewMode("mobile")}
-                  className="flex-1"
+                  className="flex-1 h-6 px-1 text-[10px]"
                 >
-                  <Smartphone className="w-4 h-4" />
+                  <Smartphone className="w-3 h-3" />
                   Mobile
                 </Button>
               </div>
             </div>
 
             {/* Edit Toggle */}
-            <div className="mb-6">
+            <div className="mb-4">
               <Button
                 variant={editMode ? "primary" : "outline"}
                 onClick={() => setEditMode(!editMode)}
-                className="w-full"
+                className="w-full h-6 px-1 text-[10px]"
               >
-                <Edit3 className="w-4 h-4" />
+                <Edit3 className="w-3 h-3" />
                 {editMode ? "Editing Mode" : "Enable Editing"}
               </Button>
+              {editMode && (
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Tap any text or image in preview to edit directly.
+                </p>
+              )}
+              {savingInlineEdits && (
+                <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+                  Saving inline edits...
+                </p>
+              )}
             </div>
 
             {/* Template Selection - Stylish Design Studio */}
             {availableTemplates.length > 0 && (
               <Card
-                className="mb-6 border-2"
+                className="mb-4 border-2"
                 style={{ borderColor: "#f724de" }}
               >
-                <CardContent className="p-4">
-                  <div className="mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+                <CardContent className="p-3">
+                  <div className="mb-3 pb-3 border-b border-gray-200 dark:border-gray-700">
                     <h3
                       className="font-bold text-lg text-gray-900 dark:text-white"
                       style={{ color: "#f724de" }}
@@ -275,12 +497,22 @@ export function WebsitePreview() {
                       {availableTemplates.length !== 1 ? "s" : ""}
                     </div>
                   </div>
-                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                  <div className="space-y-2 max-h-80 overflow-y-auto">
                     {availableTemplates.map((tpl: any, idx: number) => (
                       <button
                         key={tpl.id}
-                        onClick={() => setTemplate(tpl)}
-                        className={`w-full px-4 py-3 text-left rounded-lg border-2 transition-all transform hover:scale-105 ${
+                        onClick={async () => {
+                          try {
+                            setRegenerating(true);
+                            await applyTemplateAndRegenerate(tpl, false);
+                            toast.info("Template applied.");
+                          } catch (err: any) {
+                            toast.info(err?.message || "Failed to apply template");
+                          } finally {
+                            setRegenerating(false);
+                          }
+                        }}
+                        className={`w-full px-3 py-2 text-left rounded-lg border-2 transition-all ${
                           template?.id === tpl.id
                             ? "border-2"
                             : "border-gray-300 dark:border-gray-600 hover:border-gray-400"
@@ -324,8 +556,8 @@ export function WebsitePreview() {
 
             {/* Edit Contact Info */}
             {editMode && (
-              <Card className="mb-6">
-                <CardContent className="p-4">
+              <Card className="mb-4">
+                <CardContent className="p-3">
                   <h3 className="font-semibold text-gray-900 dark:text-white mb-3">
                     Contact Info
                   </h3>
@@ -356,7 +588,7 @@ export function WebsitePreview() {
                     />
                     <Button
                       size="sm"
-                      className="w-full"
+                      className="w-full h-7 px-1.5 text-[11px]"
                       onClick={async () => {
                         if (!id) return;
                         try {
@@ -389,9 +621,181 @@ export function WebsitePreview() {
               </Card>
             )}
 
+            {/* Brand Colors */}
+            {editMode && (
+              <Card className="mb-4">
+                <CardContent className="p-3 space-y-3">
+                  <h3 className="font-semibold text-gray-900 dark:text-white">
+                    Website Copy
+                  </h3>
+                  {!websiteConfig ? (
+                    <p className="text-xs text-gray-500">
+                      Generate a website config to edit copy.
+                    </p>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        value={websiteConfig.hero?.headline || ""}
+                        onChange={(e) =>
+                          setWebsiteConfig({
+                            ...websiteConfig,
+                            hero: { ...websiteConfig.hero, headline: e.target.value },
+                          })
+                        }
+                        placeholder="Hero headline"
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded dark:bg-gray-800 dark:border-gray-600"
+                      />
+                      <input
+                        type="text"
+                        value={websiteConfig.hero?.subheadline || ""}
+                        onChange={(e) =>
+                          setWebsiteConfig({
+                            ...websiteConfig,
+                            hero: { ...websiteConfig.hero, subheadline: e.target.value },
+                          })
+                        }
+                        placeholder="Hero subheadline"
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded dark:bg-gray-800 dark:border-gray-600"
+                      />
+                      <textarea
+                        value={websiteConfig.about?.content || ""}
+                        onChange={(e) =>
+                          setWebsiteConfig({
+                            ...websiteConfig,
+                            about: { ...websiteConfig.about, content: e.target.value },
+                          })
+                        }
+                        placeholder="About content"
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded dark:bg-gray-800 dark:border-gray-600 h-24"
+                      />
+                      <Button
+                        size="sm"
+                        className="w-full h-7 px-1.5 text-[11px]"
+                        onClick={async () => {
+                          if (!id || !websiteConfig) return;
+                          try {
+                            const token = getAccessToken();
+                            const res = await fetch(`${API_BASE}/businesses/${id}`, {
+                              method: "PATCH",
+                              headers: {
+                                "Content-Type": "application/json",
+                                Authorization: `Bearer ${token}`,
+                              },
+                              body: JSON.stringify({ generatedConfig: websiteConfig }),
+                            });
+                            if (!res.ok) throw new Error("Failed to save copy");
+                            toast.info("Website copy updated!");
+                          } catch (err) {
+                            console.error(err);
+                            toast.info("Failed to save copy");
+                          }
+                        }}
+                      >
+                        Save Copy
+                      </Button>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {editMode && (
+              <Card className="mb-4">
+                <CardContent className="p-3 space-y-3">
+                  <h3 className="font-semibold text-gray-900 dark:text-white">
+                    Brand Colors
+                  </h3>
+                  {!websiteConfig ? (
+                    <p className="text-xs text-gray-500">
+                      Generate a website config to edit colors.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-3 gap-2">
+                        {brandingColors.map((color, idx) => (
+                          <div key={`${idx}`} className="flex flex-col gap-2">
+                            <input
+                              type="color"
+                              value={color || "#3B82F6"}
+                              onChange={(e) => {
+                                const next = [...brandingColors];
+                                next[idx] = e.target.value;
+                                setBrandingColors(next);
+                              }}
+                              className="h-10 w-full rounded border border-gray-300 dark:border-gray-600"
+                            />
+                            <input
+                              type="text"
+                              value={color}
+                              onChange={(e) => {
+                                const next = [...brandingColors];
+                                next[idx] = e.target.value;
+                                setBrandingColors(next);
+                              }}
+                              placeholder="#3B82F6"
+                              className="w-full px-2 py-1 text-xs border border-gray-300 rounded dark:bg-gray-800 dark:border-gray-600"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <Button
+                        size="sm"
+                        className="w-full h-7 px-1.5 text-[11px]"
+                        onClick={async () => {
+                          if (!id || !websiteConfig) return;
+                          try {
+                            const token = getAccessToken();
+                            const colors = brandingColors.filter((c) => c.trim().length > 0);
+                            const nextConfig = {
+                              ...websiteConfig,
+                              branding: {
+                                ...websiteConfig.branding,
+                                colors,
+                              },
+                            };
+                            const res = await fetch(`${API_BASE}/businesses/${id}`, {
+                              method: "PATCH",
+                              headers: {
+                                "Content-Type": "application/json",
+                                Authorization: `Bearer ${token}`,
+                              },
+                              body: JSON.stringify({
+                                branding: { colors },
+                                generatedConfig: nextConfig,
+                              }),
+                            });
+                            if (!res.ok) throw new Error("Failed to update colors");
+                            setWebsiteConfig(nextConfig);
+                            if (template?.style) {
+                              setTemplate({
+                                ...template,
+                                style: {
+                                  ...template.style,
+                                  accent: colors[0] || template.style.accent,
+                                  secondary: colors[1] || template.style.secondary,
+                                  bgColor: colors[2] || template.style.bgColor,
+                                },
+                              });
+                            }
+                            toast.info("Brand colors updated!");
+                          } catch (err) {
+                            console.error(err);
+                            toast.info("Failed to update colors");
+                          }
+                        }}
+                      >
+                        Save Colors
+                      </Button>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Testimonials Management */}
-            <Card className="mb-6">
-              <CardContent className="p-4">
+            <Card className="mb-4">
+              <CardContent className="p-3">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-semibold text-gray-900 dark:text-white">
                     Testimonials
@@ -462,7 +866,7 @@ export function WebsitePreview() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full"
+                  className="w-full h-7 px-1.5 text-[11px]"
                   onClick={() => setShowTestimonialForm(!showTestimonialForm)}
                 >
                   {showTestimonialForm ? "✕ Cancel" : "+ Add Testimonial"}
@@ -537,7 +941,7 @@ export function WebsitePreview() {
                     />
                     <Button
                       size="sm"
-                      className="w-full"
+                      className="w-full h-7 px-1.5 text-[11px]"
                       disabled={
                         loadingTestimonial ||
                         !newTestimonial.clientName ||
@@ -586,8 +990,8 @@ export function WebsitePreview() {
             </Card>
 
             {/* Stats */}
-            <Card className="mb-6">
-              <CardContent className="p-4">
+            <Card className="mb-4">
+              <CardContent className="p-3">
                 <h3 className="font-semibold text-gray-900 dark:text-white mb-3">
                   Performance
                 </h3>
@@ -637,61 +1041,90 @@ export function WebsitePreview() {
               </CardContent>
             </Card>
 
-            {/* Publish Button */}
-            {!business?.isPublished && (
-              <Button
-                variant="primary"
-                className="w-full mb-6"
-                disabled={publishing}
-                onClick={async () => {
-                  if (!id) return;
-                  setPublishing(true);
-                  try {
-                    const token = localStorage.getItem("supabase.auth.token");
-                    const res = await fetch(
-                      `${API_BASE}/businesses/${id}/publish`,
-                      {
-                        method: "POST",
-                        headers: {
-                          "Content-Type": "application/json",
-                          Authorization: `Bearer ${token}`,
-                        },
+            {/* Publish / Unpublish Button */}
+            <Button
+              variant="primary"
+              className="w-full h-6 px-1 text-[10px] mb-4"
+              disabled={publishing}
+              onClick={async () => {
+                if (!id) return;
+                setPublishing(true);
+                try {
+                  const token = getAccessToken();
+                  if (business?.isPublished) {
+                    const res = await fetch(`${API_BASE}/businesses/${id}`, {
+                      method: "PATCH",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
                       },
-                    );
-                    if (!res.ok) throw new Error("Failed to publish");
-                    const data = await res.json();
-                    setBusiness(data);
-                    toast.info(`Site published at: ${data.publishedUrl}`);
-                  } catch (err: any) {
-                    console.error(err);
-                    toast.info("Failed to publish site");
-                  } finally {
-                    setPublishing(false);
+                      body: JSON.stringify({
+                        isPublished: false,
+                        publishedUrl: null,
+                        publishedAt: null,
+                      }),
+                    });
+                    if (!res.ok) throw new Error("Failed to unpublish");
+                    const updated = await res.json();
+                    setBusiness(updated);
+                    toast.info("Site taken down from live.");
+                    return;
                   }
-                }}
-              >
-                {publishing ? "Publishing..." : "Publish Site"}
-              </Button>
-            )}
+
+                  const res = await fetch(`${API_BASE}/businesses/${id}/publish`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${token}`,
+                    },
+                  });
+                  if (!res.ok) throw new Error("Failed to publish");
+                  const data = await res.json();
+                  const updated = data?.business || data;
+                  setBusiness(updated);
+                  const fallbackLiveUrl = `${window.location.origin}/live/${id}`;
+                  const publishedUrl = data?.shareUrl || updated?.publishedUrl || fallbackLiveUrl;
+                  if (publishedUrl) {
+                    toast.info(`Site published at: ${publishedUrl}`);
+                    window.open(publishedUrl, "_blank");
+                  } else {
+                    toast.info("Site published, but no URL was returned.");
+                  }
+                } catch (err: any) {
+                  console.error(err);
+                  toast.info(business?.isPublished ? "Failed to unpublish site" : "Failed to publish site");
+                } finally {
+                  setPublishing(false);
+                }
+              }}
+            >
+              {publishing
+                ? business?.isPublished
+                  ? "Unpublishing..."
+                  : "Publishing..."
+                : business?.isPublished
+                  ? "Unpublish Site"
+                  : "Publish Site"}
+            </Button>
             {/* Quick Actions */}
             <div className="space-y-2">
               <Button
                 variant="outline"
                 size="sm"
-                className="w-full justify-start"
+                className="w-full h-6 px-1 text-[10px] justify-start"
                 onClick={() => setShowCalendarModal(true)}
               >
-                <Calendar className="w-4 h-4" />
+                <Calendar className="w-3 h-3" />
                 Calendar Settings
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                className="w-full justify-start"
+                className="w-full h-6 px-1 text-[10px] justify-start"
                 onClick={async () => {
                   if (!id) return;
                   try {
-                    const token = localStorage.getItem("supabase.auth.token");
+                    const token = getAccessToken();
                     const res = await fetch(
                       `${API_BASE}/businesses/${id}/leads`,
                       {
@@ -708,12 +1141,21 @@ export function WebsitePreview() {
                   }
                 }}
               >
-                <Mail className="w-4 h-4" />
+                <Mail className="w-3 h-3" />
                 View Leads
               </Button>
             </div>
           </div>
         </aside>
+        {!shellIsMobile && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize preview settings"
+            className="w-2 flex-none cursor-col-resize bg-transparent hover:bg-fuchsia-500/10 active:bg-fuchsia-500/20"
+            onMouseDown={() => setIsResizingSidebar(true)}
+          />
+        )}
 
         <CalendarIntegrationModal
           isOpen={showCalendarModal}
@@ -721,13 +1163,13 @@ export function WebsitePreview() {
         />
 
         {/* Main Preview Area */}
-        <main className="flex-1 p-8">
-          <div className="max-w-6xl mx-auto">
+        <main className={shellIsMobile ? "min-w-0 flex-1 p-2" : "min-w-0 flex-1 p-4 lg:p-5"}>
+          <div className="w-full">
             <div
               className={`bg-white rounded-lg shadow-2xl transition-all duration-300 ${
                 viewMode === "mobile"
-                  ? "max-w-[375px] mx-auto overflow-y-auto"
-                  : "overflow-hidden"
+                  ? "w-full max-w-[390px] mx-auto overflow-hidden"
+                  : "overflow-hidden w-full"
               }`}
               style={{
                 height: viewMode === "mobile" ? "667px" : "auto",
@@ -741,8 +1183,25 @@ export function WebsitePreview() {
                   </div>
                 )}
 
-                {/* Use template styles with fallbacks */}
-                {template &&
+                {configLoading ? (
+                  <div className="p-12 text-center text-gray-600 dark:text-gray-300">
+                    Loading website preview...
+                  </div>
+                ) : websiteConfig ? (
+                  <WebsiteRenderer
+                    config={websiteConfig}
+                    templateId={websiteConfig.templateId || "service-heavy"}
+                    businessId={id || ""}
+                    isPreview
+                    editMode={editMode}
+                    onImageUpload={uploadPreviewImage}
+                    onConfigChange={(nextConfig) => {
+                      setWebsiteConfig(nextConfig);
+                      void persistGeneratedConfig(nextConfig);
+                    }}
+                  />
+                ) : (
+                  template &&
                   (() => {
                     const templateStyle = getTemplateStyle(template);
                     return (
@@ -1524,7 +1983,7 @@ export function WebsitePreview() {
                                             template.style.secondary,
                                         }}
                                       >
-                                        <div className="h-40 bg-gradient-to-br from-gray-200 to-gray-300" />
+                                        <div className="h-40 bg-linear-to-br from-gray-200 to-gray-300" />
                                         <div className="p-4">
                                           <p
                                             className="text-xs mb-2"
@@ -1658,9 +2117,7 @@ export function WebsitePreview() {
                                       };
                                       try {
                                         if (id) {
-                                          const token = localStorage.getItem(
-                                            "supabase.auth.token",
-                                          );
+                                          const token = getAccessToken();
                                           const headers: HeadersInit = {
                                             "Content-Type": "application/json",
                                           };
@@ -1807,7 +2264,7 @@ export function WebsitePreview() {
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <Mail className="w-4 h-4" />
+                                  <Mail className="w-3.5 h-3.5" />
                                   <span>
                                     {business?.contactEmail ||
                                       "hello@business.com"}
@@ -1879,7 +2336,8 @@ export function WebsitePreview() {
                         </footer>
                       </>
                     );
-                  })()}
+                  })()
+                )}
               </div>
             </div>
           </div>

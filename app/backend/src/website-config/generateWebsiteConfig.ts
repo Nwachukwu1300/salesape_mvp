@@ -266,7 +266,7 @@ function getDefaultHeroImage(category: string): string {
 export async function generateWebsiteConfig(
   input: WebsiteConfigGenerationInput
 ): Promise<WebsiteConfig> {
-  const { businessUnderstanding, templateId, scrapedData } = input;
+  const { businessUnderstanding, templateId, scrapedData, variationSeed } = input;
   const template = getTemplateById(templateId);
 
   if (!template) {
@@ -289,6 +289,23 @@ export async function generateWebsiteConfig(
     logoUrl,
     imageAssets,
   } = businessUnderstanding;
+
+  const variationValue = (() => {
+    const seed = String(variationSeed || Date.now());
+    let hash = 0;
+    for (let i = 0; i < seed.length; i += 1) {
+      hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash);
+  })();
+
+  const rotateArray = <T>(arr: T[]): T[] => {
+    if (!arr.length) return arr;
+    const offset = variationValue % arr.length;
+    return [...arr.slice(offset), ...arr.slice(0, offset)];
+  };
+
+  const rotatedServices = rotateArray(services || []);
 
   // Helper to check if a feature is enabled
   const hasFeature = (feature: string) =>
@@ -340,14 +357,14 @@ export async function generateWebsiteConfig(
   const config: any = {
     meta: {
       title: `${name} | ${category} Services${location ? ` in ${location}` : ''}`,
-      description: generateMetaDescription(name, services, location, targetAudience),
+      description: generateMetaDescription(name, rotatedServices, location, targetAudience),
       keywords: seoKeywords,
       ogImage: heroImage,
     },
     branding: branddingConfig,
     hero: {
-      headline: generateHeadline(name, services, valueProposition),
-      subheadline: generateSubheadline(targetAudience, services, location),
+      headline: generateHeadline(name, rotatedServices, valueProposition),
+      subheadline: generateSubheadline(targetAudience, rotatedServices, location),
       ctaText: generateCtaText(contactPreferences),
       ctaLink: contactPreferences.booking ? '#booking' : '#contact',
       heroImage,
@@ -356,7 +373,7 @@ export async function generateWebsiteConfig(
     services: {
       title: 'Our Services',
       subtitle: `What ${name} Can Do For You`,
-      items: generateServiceItems(services, brandTone, serviceImages.length > 0 ? serviceImages : undefined),
+      items: generateServiceItems(rotatedServices, brandTone, serviceImages.length > 0 ? serviceImages : undefined),
     },
     about: {
       title: `About ${name}`,
@@ -368,7 +385,7 @@ export async function generateWebsiteConfig(
       testimonials: {
         title: 'What Our Clients Say',
         subtitle: 'Real feedback from real customers',
-        items: generatePlaceholderTestimonials(name, services),
+        items: generatePlaceholderTestimonials(name, rotatedServices),
       },
     }),
     // Contact form - only if feature selected
@@ -411,7 +428,7 @@ export async function generateWebsiteConfig(
       pricingTable: {
         title: 'Our Pricing',
         subtitle: 'Transparent pricing for all services',
-        items: services.slice(0, 4).map(service => ({
+        items: rotatedServices.slice(0, 4).map(service => ({
           name: service,
           price: 'Contact for quote',
           description: `Professional ${service.toLowerCase()} services`,
@@ -420,7 +437,7 @@ export async function generateWebsiteConfig(
     }),
     localSEO: {
       location,
-      keywords: generateLocalSEOKeywords(location, services, category),
+      keywords: generateLocalSEOKeywords(location, rotatedServices, category),
       businessHours: 'Mon-Fri: 9am-5pm',
     },
     trustSignals: {
@@ -429,7 +446,7 @@ export async function generateWebsiteConfig(
       certifications: [],
     },
     footer: {
-      copyrightText: `© ${new Date().getFullYear()} ${name}. All rights reserved.`,
+      copyrightText: `© ${new Date().getFullYear()} ${name}. All rights reserved. Powered by SalesAPE.ai.`,
       quickLinks: [
         { label: 'Services', anchor: '#services' },
         { label: 'About', anchor: '#about' },

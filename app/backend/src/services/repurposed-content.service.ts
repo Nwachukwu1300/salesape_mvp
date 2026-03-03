@@ -26,6 +26,27 @@ export async function createRepurposedContent(input: CreateRepurposedContentInpu
     if (input.hashtags !== undefined && input.hashtags !== null) {
       data.hashtags = input.hashtags;
     }
+    if (input.assetUrl !== undefined && input.assetUrl !== null) {
+      data.assetUrl = input.assetUrl;
+    }
+    if (input.assetPath !== undefined && input.assetPath !== null) {
+      data.assetPath = input.assetPath;
+    }
+    if (input.score !== undefined && input.score !== null) {
+      data.score = input.score;
+    }
+    if (input.scoreBreakdown !== undefined && input.scoreBreakdown !== null) {
+      data.scoreBreakdown = input.scoreBreakdown;
+    }
+    if (input.trendHooks !== undefined && input.trendHooks !== null) {
+      data.trendHooks = input.trendHooks;
+    }
+    if (input.performance !== undefined && input.performance !== null) {
+      data.performance = input.performance;
+    }
+    if (input.metadata !== undefined && input.metadata !== null) {
+      data.metadata = input.metadata;
+    }
 
     const content = await prisma.repurposedContent.create({ data } as any);
     return content as RepurposedContent;
@@ -42,8 +63,15 @@ export async function getRepurposedContent(id: string): Promise<RepurposedConten
   try {
     const content = await prisma.repurposedContent.findUnique({
       where: { id },
+      include: { distributions: { orderBy: { createdAt: 'desc' }, take: 1 } },
     });
-    return (content as RepurposedContent) || null;
+    if (!content) return null;
+    const latestMetrics = content.distributions?.[0]?.metrics;
+    const result: any = { ...content };
+    if (!result.performance && latestMetrics) {
+      result.performance = latestMetrics;
+    }
+    return result as RepurposedContent;
   } catch (error) {
     console.error('Failed to get repurposed content:', error);
     throw error;
@@ -58,8 +86,14 @@ export async function getBusinessRepurposedContent(businessId: string): Promise<
     const contents = await prisma.repurposedContent.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
+      include: { distributions: { orderBy: { createdAt: 'desc' }, take: 1 } },
     });
-    return contents as RepurposedContent[];
+    return contents.map((content: any) => {
+      if (!content.performance && content.distributions?.[0]?.metrics) {
+        return { ...content, performance: content.distributions[0].metrics } as RepurposedContent;
+      }
+      return content as RepurposedContent;
+    });
   } catch (error) {
     console.error('Failed to get business repurposed content:', error);
     throw error;

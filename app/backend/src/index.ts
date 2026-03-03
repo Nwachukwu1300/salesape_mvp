@@ -8,6 +8,7 @@ dotenv.config(); // Load .env if .env.local doesn't exist
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
@@ -32,13 +33,10 @@ import {
   getJobStatus,
 } from './queues/website.queue.js';
 import type { WebsiteGenerationJobData } from './queues/website.queue.js';
-import { startWorker } from './workers/website.worker.js';
-import { startContentIngestionWorker } from './workers/content-ingestion.worker.js';
-import { startRepurposingWorker } from './workers/repurposing.worker.js';
-import { startDistributionWorker } from './workers/distribution.worker.js';
 import authRouter from './routes/auth.js';
 import apeChatRouter from './routes/apeChat.js';
 import settingsRouter from './routes/settings.js';
+import supabaseServer from './lib/supabase.server.js';
 
 // Import Phase 2B services
 import {
@@ -57,10 +55,11 @@ import {
   createContentInput,
   getContentInput,
   getBusinessContentInputs,
+  updateContentInput,
   deleteContentInput,
 } from './services/content-input.service.js';
+import { storageService } from './services/storage.service.js';
 import {
-  createRepurposedContent,
   getRepurposedContent,
   getRepurposedContentByInput,
   updateRepurposedContent,
@@ -76,14 +75,6 @@ import {
   getBusinessDistributions,
 } from './services/platform-distribution.service.js';
 
-// Import AI repurposing service
-import {
-  repurposeContentWithAI,
-  batchRepurposeContent,
-  repurposeContentWithClaude,
-  repurposeContentWithOpenAI,
-} from './utils/ai-repurposing.js';
-
 // Import unified publisher orchestrator
 import {
   publishToAllPlatforms,
@@ -93,7 +84,8 @@ import {
 // Import new utilities and middleware
 import { logger, requestLogger } from './utils/logger.js';
 import { encryptData, decryptData, isEncrypted, getDecryptedValue } from './utils/encryption.js';
-import { generateBusinessIntelligence, generateStructuredBusinessUnderstanding, calculateLeadScore } from './utils/ai-intelligence.js';
+import { generateBusinessIntelligence, generateStructuredBusinessUnderstanding, generateSEOKeywords, calculateLeadScore } from './utils/ai-intelligence.js';
+import OpenAIClient from './utils/openai-client.js';
 
 // Import Phase 4 services
 import {
@@ -187,18 +179,15 @@ import {
   calculatePrePublishScore
 } from './utils/content-repurposer.js';
 import {
-  leadAutomationQueue,
-  contentGenerationQueue,
-  socialPostingQueue,
-  reviewRequestQueue,
-  analyticsPollingQueue,
   enqueueLeadAutomation,
   enqueueContentGeneration,
+  enqueueRepurposing,
   enqueueSocialPosting,
   enqueueReviewRequest,
   getQueueStats,
   getQueuesHealth
 } from './queues/index.js';
+import { getQueueProvider } from './queues/provider.js';
 import { 
   validationErrorHandler, 
   authValidation, 
@@ -222,6 +211,7 @@ const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const app = express();
 const prisma = new PrismaClient();
+const isDevelopment = process.env.NODE_ENV !== 'production';
 
 // NOTE: Sentry initialization moved to after routes and before the error handler
 // to avoid any accidental startup impact. See utils/sentry.ts for config.
@@ -237,7 +227,12 @@ app.use(helmet({
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https:", "blob:"],
       scriptSrc: ["'self'"],
-      connectSrc: ["'self'", "https://api.unsplash.com", "https://www.googleapis.com"],
+      connectSrc: [
+        "'self'",
+        ...(isDevelopment ? ["http://localhost:*", "ws://localhost:*"] : []),
+        "https://api.unsplash.com",
+        "https://www.googleapis.com",
+      ],
     },
   },
   crossOriginEmbedderPolicy: false, // Allow embedding for preview
@@ -246,51 +241,90 @@ app.use(helmet({
 // Limit request body size to 10MB to prevent abuse
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(cookieParser());
 app.use(requestLogger); // Request/response logging
 app.use(globalLimiter); // Global rate limiting
 
 // Register auth routes
 app.use(authRouter);
-app.use('/api/ape', apeChatRouter);
-app.use('/api/settings', settingsRouter);
 
 // Start website generation worker (if Redis available) — ensure Redis is ready first
 async function initWorkers() {
   try {
-    // Check Redis health - non-blocking (warn on failure but continue)
-    if (process.env.REDIS_HOST || process.env.NODE_ENV === 'development') {
-      try {
-        const { ensureRedisReady } = await import('./utils/redis-health.js');
-        await ensureRedisReady({ retries: 3, timeoutMs: 3000 });
-        console.log('[Startup] Redis is ready for workers');
-      } catch (err) {
-        console.warn('[Startup] Redis readiness check failed — workers will not initialize but server will run.', err instanceof Error ? err.message : String(err));
-        return; // Exit early if Redis fails - don't try to start workers
+    const queueProvider = getQueueProvider();
+    console.log(`[Startup] Queue provider: ${queueProvider}`);
+
+    // Allow skipping starting any Redis-backed workers in local/dev
+    if (process.env.REDIS_SKIP_WORKERS === 'true') {
+      console.log('[Startup] REDIS_SKIP_WORKERS=true — skipping worker initialization');
+      return;
+    }
+
+    if (queueProvider === 'bullmq') {
+      // Check Redis health - non-blocking (warn on failure but continue)
+      // Allow skipping the readiness check in local/dev by setting REDIS_SKIP_READY=true
+      const skipRedisReady = process.env.REDIS_SKIP_READY === 'true';
+      if (skipRedisReady) {
+        console.log('[Startup] REDIS_SKIP_READY=true — skipping Redis readiness check');
+      } else if (process.env.REDIS_HOST || process.env.NODE_ENV === 'development') {
+        try {
+          const { ensureRedisReady } = await import('./utils/redis-health.js');
+          await ensureRedisReady({ retries: 3, timeoutMs: 3000 });
+          console.log('[Startup] Redis is ready for workers');
+        } catch (err) {
+          console.warn('[Startup] Redis readiness check failed — workers will not initialize but server will run.', err instanceof Error ? err.message : String(err));
+          return; // Exit early if Redis fails - don't try to start workers
+        }
       }
     }
 
-    // Ensure Supabase is reachable before starting workers that rely on storage
-    try {
-      const { ensureSupabaseReady } = await import('./utils/supabase-health.js');
-      await ensureSupabaseReady({ retries: 3, timeoutMs: 5000 });
-      console.log('[Startup] Supabase is ready');
-    } catch (err) {
-      console.warn('[Startup] Supabase readiness check failed — proceeding but storage ops may fail.', err instanceof Error ? err.message : String(err));
+    // Ensure Supabase is reachable before starting workers that rely on storage.
+    // Keep this optional in non-BullMQ mode to avoid unnecessary local startup delay.
+    if (queueProvider === 'bullmq' && process.env.SUPABASE_SKIP_READY !== 'true') {
+      try {
+        const { ensureSupabaseReady } = await import('./utils/supabase-health.js');
+        await ensureSupabaseReady({ retries: 3, timeoutMs: 5000 });
+        console.log('[Startup] Supabase is ready');
+      } catch (err) {
+        console.warn('[Startup] Supabase readiness check failed — proceeding but storage ops may fail.', err instanceof Error ? err.message : String(err));
+      }
+    } else if (process.env.SUPABASE_SKIP_READY === 'true') {
+      console.log('[Startup] SUPABASE_SKIP_READY=true — skipping Supabase readiness check');
     }
 
-    // Initialize workers after readiness checks
-    await startWorker();
-    console.log('[Worker] Website generation worker initialized');
+    if (queueProvider === 'bullmq') {
+      // Initialize BullMQ workers after readiness checks (dynamically import so modules
+      // that create Redis connections at import-time are not evaluated until
+      // we're ready to start workers).
+      {
+        const { startWorker } = await import('./workers/website.worker.js');
+        await startWorker();
+        console.log('[Worker] Website generation worker initialized');
+      }
 
-    // Start content pipeline workers
-    await startContentIngestionWorker();
-    console.log('[Worker] Content ingestion worker initialized');
+      {
+        const { startContentIngestionWorker } = await import('./workers/content-ingestion.worker.js');
+        await startContentIngestionWorker();
+        console.log('[Worker] Content ingestion worker initialized');
+      }
 
-    await startRepurposingWorker();
-    console.log('[Worker] Repurposing worker initialized');
+      {
+        const { startRepurposingWorker } = await import('./workers/repurposing.worker.js');
+        await startRepurposingWorker();
+        console.log('[Worker] Repurposing worker initialized');
+      }
 
-    await startDistributionWorker();
-    console.log('[Worker] Distribution worker initialized');
+      {
+        const { startDistributionWorker } = await import('./workers/distribution.worker.js');
+        await startDistributionWorker();
+        console.log('[Worker] Distribution worker initialized');
+      }
+    } else {
+      // In local/dev pg-boss mode, start only repurposing worker pipeline.
+      const { startRepurposingWorker } = await import('./workers/repurposing.worker.js');
+      await startRepurposingWorker();
+      console.log('[Worker] Repurposing worker initialized (pg-boss)');
+    }
   } catch (err) {
     console.warn('[Worker] Failed to start workers:', err instanceof Error ? err.message : String(err));
   }
@@ -311,7 +345,7 @@ interface TokenPayload {
 }
 
 // --- Authentication Middleware (must be defined before route usage) ---
-const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
+const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -320,23 +354,61 @@ const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) 
   }
 
   try {
-    // Decode the token without verification
-    // Supabase tokens are JWT-signed by Supabase and we trust them
-    const decoded = jwt.decode(token) as any;
-    
-    if (!decoded) {
-      return res.status(403).json({ error: 'Invalid token format' });
+    let userId: string | undefined;
+    let email: string | undefined;
+    let decodedToken: any;
+
+    // Primary path: validate Supabase JWT signature by asking Supabase auth
+    if (supabaseServer) {
+      const { data, error } = await supabaseServer.auth.getUser(token);
+      if (!error && data?.user?.id) {
+        userId = data.user.id;
+        email = data.user.email ?? undefined;
+      }
     }
-    
-    // Extract userId and email from Supabase JWT structure
-    // Supabase uses 'sub' for user ID
-    const userId = decoded.sub || decoded.userId;
-    const email = decoded.email;
+
+    // Dev fallback: decode Supabase JWT without verification when server key is missing
+    if (!userId && !supabaseServer && process.env.NODE_ENV !== 'production') {
+      decodedToken = jwt.decode(token) as any;
+      userId = decodedToken?.sub || decodedToken?.user_id;
+      email = decodedToken?.email;
+    }
+
+    // Fallback path: verify app-issued JWTs
+    if (!userId) {
+      decodedToken = jwt.verify(token, JWT_SECRET) as any;
+      userId = decodedToken?.sub || decodedToken?.userId;
+      email = decodedToken?.email;
+    }
+
+    if (!email && userId && process.env.NODE_ENV !== 'production') {
+      email =
+        decodedToken?.email ||
+        decodedToken?.user_metadata?.email ||
+        `user-${userId}@local.test`;
+    }
     
     if (!userId) {
       return res.status(403).json({ error: 'Invalid token: missing user ID' });
     }
-    
+    if (!email) {
+      return res.status(403).json({ error: 'Invalid token: missing email' });
+    }
+
+    // ensure the user exists in our database; create a lightweight record if not
+    let existing = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existing) {
+      console.warn('[Auth] no DB user for token userId, creating one:', userId);
+      existing = await prisma.user.create({
+        data: {
+          id: userId,
+          email,
+          password: 'SUPABASE_AUTH',
+          name: email.split('@')[0] || 'User',
+        },
+      });
+    }
+
     req.userId = userId;
     req.email = email;
     next();
@@ -345,10 +417,284 @@ const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) 
   }
 };
 
+// Protected API routers
+app.use('/api/ape', authenticateToken, apeChatRouter);
+app.use('/api/settings', authenticateToken, settingsRouter);
+
+// OpenAI TTS proxy (streaming)
+app.post('/api/tts', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required for TTS' });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ error: 'OPENAI_API_KEY missing' });
+    }
+
+    const voice = String(req.body?.voice || 'nova');
+    const model = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
+
+    const upstream = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        voice,
+        input: text,
+        response_format: 'mp3',
+      }),
+    });
+
+    if (!upstream.ok) {
+      const errText = await upstream.text();
+      return res.status(upstream.status).json({
+        error: 'OpenAI TTS request failed',
+        details: errText,
+      });
+    }
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    const body = (upstream as any).body;
+    if (!body || typeof body.pipe !== 'function') {
+      const buffer = await upstream.arrayBuffer();
+      return res.status(200).send(Buffer.from(buffer));
+    }
+
+    body.pipe(res);
+  } catch (err) {
+    logger.error('TTS proxy error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to generate TTS audio' });
+  }
+});
+
 // Helper to normalize route params which can be string | string[] | undefined
 function paramToString(p: string | string[] | undefined): string | undefined {
   if (Array.isArray(p)) return p[0];
   return p;
+}
+
+function sseSend(res: Response, data: string, event?: string) {
+  if (event) res.write(`event: ${event}\n`);
+  res.write(`data: ${data}\n\n`);
+}
+
+function buildConversationQuestionPrompt(params: {
+  stage: string;
+  requiredQuestion: string;
+  extracted: any;
+  recentMessages: any[];
+}) {
+  const { stage, requiredQuestion, extracted, recentMessages } = params;
+  return [
+    'You are APE, the SalesAPE onboarding assistant.',
+    'Ask the user ONLY the next required question, friendly and concise.',
+    'Do not ask multiple questions. Do not add bullets or markdown.',
+    'Return only the question text.',
+    '',
+    `Stage: ${stage}`,
+    `Required question intent: ${requiredQuestion}`,
+    '',
+    `Current extracted data: ${JSON.stringify(extracted || {}, null, 2)}`,
+    '',
+    `Recent conversation: ${JSON.stringify(recentMessages || [], null, 2)}`,
+  ].join('\n');
+}
+
+function buildConversationSummaryPrompt(extracted: any) {
+  return [
+    'You are APE, the SalesAPE onboarding assistant.',
+    'Generate a plain-text business summary in simple lines.',
+    'No markdown, no bullets, no asterisks.',
+    'Format exactly as:',
+    'Business Profile Summary',
+    'Business Name: ...',
+    'Category: ...',
+    'Location: ...',
+    'Services: ...',
+    'Value Proposition: ...',
+    'SEO Keywords: ...',
+    '',
+    'End with: Everything looks good. Ready to create your website?',
+    '',
+    `Business data: ${JSON.stringify(extracted || {}, null, 2)}`,
+  ].join('\n');
+}
+
+function isAffirmativeConfirmation(input: string): boolean {
+  const normalized = String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ');
+
+  const confirmations = new Set([
+    'yes',
+    'y',
+    'yep',
+    'yeah',
+    'ok',
+    'okay',
+    'sure',
+    'go ahead',
+    'goahead',
+    'proceed',
+    'continue',
+    'sounds good',
+  ]);
+  return confirmations.has(normalized);
+}
+
+function normalizeOnboardingExtracted(extractedInput: any): any {
+  const extracted = { ...(extractedInput || {}) };
+  const name = String(extracted.name || '').trim() || 'My Business';
+  const category = String(extracted.category || '').trim() || 'Local Business';
+  const location = String(extracted.location || '').trim() || 'Your City';
+  const services = Array.isArray(extracted.services)
+    ? extracted.services.map((s: any) => String(s).trim()).filter(Boolean)
+    : [];
+  const valueProposition = String(extracted.valueProposition || '').trim() || 'Reliable service with a focus on quality and customer results.';
+  const targetAudience =
+    String(extracted.targetAudience || '').trim() ||
+    `People looking for ${category.toLowerCase()} in ${location}`;
+
+  const contactPreferences = extracted.contactPreferences || {};
+  const normalizedContact = {
+    email: Boolean(contactPreferences.email),
+    phone: Boolean(contactPreferences.phone),
+    booking: Boolean(contactPreferences.booking),
+  };
+  if (!normalizedContact.email && !normalizedContact.phone && !normalizedContact.booking) {
+    normalizedContact.email = true;
+  }
+
+  const trustSignals =
+    Array.isArray(extracted.trustSignals) && extracted.trustSignals.length > 0
+      ? extracted.trustSignals
+      : ['Trusted by local customers', 'Fast response times', 'Quality-first service'];
+
+  const seed = [name, category, location, services.join(', '), valueProposition, targetAudience]
+    .filter(Boolean)
+    .join(' ');
+  const seoKeywords =
+    Array.isArray(extracted.seoKeywords) && extracted.seoKeywords.length >= 5
+      ? extracted.seoKeywords
+      : generateSEOKeywords(name, seed);
+  const rawSourceUrl = String(extracted.sourceUrl || '').trim();
+  let sourceUrl = 'none';
+  if (rawSourceUrl) {
+    const lowered = rawSourceUrl.toLowerCase();
+    if (!['none', 'no', 'n/a', 'na'].includes(lowered)) {
+      sourceUrl = /^https?:\/\//i.test(rawSourceUrl) ? rawSourceUrl : `https://${rawSourceUrl}`;
+    }
+  }
+
+  return {
+    ...extracted,
+    name,
+    category,
+    location,
+    services: services.length ? services : [category],
+    valueProposition,
+    targetAudience,
+    brandTone: extracted.brandTone || 'friendly',
+    brandColors:
+      Array.isArray(extracted.brandColors) && extracted.brandColors.length > 0
+        ? extracted.brandColors
+        : ['#F724DE', '#111827', '#FFFFFF'],
+    trustSignals,
+    seoKeywords,
+    sourceUrl,
+    contactPreferences: normalizedContact,
+  };
+}
+
+async function refineBusinessUnderstandingWithModel(
+  extracted: any,
+  conversationMessages: any[]
+): Promise<any> {
+  try {
+    if (process.env.NODE_ENV !== 'production') return extracted;
+    if (!process.env.OPENAI_API_KEY) return extracted;
+
+    const recentMessages = (conversationMessages || []).slice(-12).map((m: any) => ({
+      role: m?.role || 'user',
+      content: String(m?.content || ''),
+    }));
+
+    const prompt = `
+You are improving structured business-understanding JSON for website generation.
+Keep the same schema fields, improve quality/clarity, and normalize values:
+- brandTone must be one of: professional, friendly, luxury, bold, casual
+- brandColors should be valid hex colors when possible (e.g. #1E40AF)
+- seoKeywords should be specific, local-intent friendly, and between 5 and 20
+- preserve user intent from the conversation
+
+Return ONLY valid JSON for this schema:
+{
+  "name": string,
+  "category": string,
+  "location": string,
+  "sourceUrl"?: string,
+  "services": string[],
+  "valueProposition": string,
+  "targetAudience": string,
+  "brandTone": "professional"|"friendly"|"luxury"|"bold"|"casual",
+  "brandColors": string[],
+  "trustSignals": string[],
+  "seoKeywords": string[],
+  "contactPreferences": { "email": boolean, "phone": boolean, "booking": boolean },
+  "logoUrl"?: string,
+  "imageAssets"?: { "hero"?: string, "gallery"?: string[] }
+}
+
+Current extracted JSON:
+${JSON.stringify(extracted, null, 2)}
+
+Recent conversation:
+${JSON.stringify(recentMessages, null, 2)}
+`.trim();
+
+    const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini';
+    const stream = await (OpenAIClient as any).responses.stream({
+      model,
+      input: prompt,
+    });
+
+    let output = '';
+    for await (const event of stream as any) {
+      if (!event) continue;
+      if (typeof event === 'string') {
+        output += event;
+        continue;
+      }
+      if (event.type === 'response.delta' && event.delta?.content) {
+        output += Array.isArray(event.delta.content)
+          ? event.delta.content.join('')
+          : String(event.delta.content);
+        continue;
+      }
+      if (event.delta?.content) {
+        output += Array.isArray(event.delta.content)
+          ? event.delta.content.join('')
+          : String(event.delta.content);
+      }
+    }
+
+    const parsed = extractJSONFromResponse(output);
+    const validation = validateAIResponse(parsed);
+    if (validation.valid && validation.data) return validation.data;
+    return extracted;
+  } catch (err) {
+    logger.warn('Business understanding refinement failed', { error: String(err) });
+    return extracted;
+  }
 }
 
 // Lightweight health endpoint for readiness checks
@@ -362,240 +708,6 @@ app.get('/health', async (_req, res) => {
   }
 });
 
-// DEV ONLY: Test conversation generation without auth
-app.get('/dev/conversation-test', async (_req: Request, res: Response) => {
-  try {
-    console.log('Testing conversation functions...');
-    
-    // Test getCurrentStage
-    const stage = getCurrentStage(undefined);
-    console.log('Stage:', stage);
-    
-    // Test generateNextQuestion
-    const question = generateNextQuestion(stage);
-    console.log('Question length:', question.length);
-    
-    res.json({
-      status: 'ok',
-      stage,
-      questionLength: question.length,
-      questionPreview: question.substring(0, 50) + '...',
-    });
-  } catch (err: any) {
-    console.error('Conversation test error:', err);
-    res.status(500).json({
-      status: 'error',
-      error: err?.message,
-      stack: process.env.NODE_ENV === 'development' ? err?.stack : undefined,
-    });
-  }
-});
-
-// DEV ONLY: Test Prisma connection directly
-app.get('/dev/prisma-test', async (_req: Request, res: Response) => {
-  try {
-    console.log('[DEBUG] Testing Prisma connection...');
-    
-    // Test basic query
-    const result = await prisma.$queryRaw`SELECT 1 as test`;
-    console.log('[DEBUG] Raw query works:', result);
-    
-    // Test ConversationSession exists
-    const count = await prisma.conversationSession.count();
-    console.log('[DEBUG] ConversationSession count:', count);
-    
-    // Test schema inspection
-    const [schema] = (await prisma.$queryRaw`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-      AND table_name = 'ConversationSession'
-    `) as any[];
-    
-    res.json({
-      status: 'ok',
-      raw_query: 'works',
-      conversation_count: count,
-      table_exists: !!schema,
-    });
-  } catch (err: any) {
-    console.error('[DEBUG] Prisma test error:', err);
-    res.status(500).json({
-      status: 'error',
-      error: err?.message,
-      code: err?.code,
-      meta: err?.meta,
-      stack: process.env.NODE_ENV === 'development' ? err?.stack : undefined,
-    });
-  }
-});
-
-// DEV ONLY: Test authenticated conversation start without DB write
-app.post('/dev/conversation-auth-test', authenticateToken, async (req: AuthRequest, res: Response) => {
-  try {
-    console.log('[DEBUG] Auth test - userId:', req.userId);
-    console.log('[DEBUG] Auth test - email:', req.email);
-    
-    // Test functions work
-    const stage = getCurrentStage(undefined);
-    console.log('[DEBUG] Got stage:', stage);
-    
-    const question = generateNextQuestion(stage);
-    console.log('[DEBUG] Got question, length:', question.length);
-    
-    res.json({
-      status: 'ok',
-      userId: req.userId,
-      email: req.email,
-      stage,
-      questionLength: question.length,
-    });
-  } catch (err: any) {
-    console.error('[DEBUG] Auth test error:', err);
-    res.status(500).json({
-      status: 'error',
-      error: err?.message,
-      stack: process.env.NODE_ENV === 'development' ? err?.stack : undefined,
-    });
-  }
-});
-
-// DEV ONLY: Test full conversation start with detailed logging
-app.post('/dev/conversation-start-debug', authenticateToken, async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.userId;
-    console.log('[DEBUG] Step 1: Got userId:', userId);
-    
-    if (!userId) {
-      console.error('[DEBUG] No userId!');
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    console.log('[DEBUG] Step 2: Testing functions...');
-    let stage: any;
-    let question: string;
-    
-    try {
-      stage = getCurrentStage(undefined);
-      console.log('[DEBUG] Step 2a: getCurrentStage returned:', stage);
-    } catch (e: any) {
-      console.error('[DEBUG] Step 2a FAILED:', e.message);
-      throw e;
-    }
-    
-    try {
-      question = generateNextQuestion(stage);
-      console.log('[DEBUG] Step 2b: generateNextQuestion returned, length:', question.length);
-    } catch (e: any) {
-      console.error('[DEBUG] Step 2b FAILED:', e.message);
-      throw e;
-    }
-
-    console.log('[DEBUG] Step 3: Preparing Prisma data...');
-    const messages = [
-      {
-        role: 'assistant',
-        content: question,
-        timestamp: new Date(),
-      },
-    ];
-    console.log('[DEBUG] Step 3a: Messages array created, length:', messages.length);
-    console.log('[DEBUG] Step 3b: Message object:', JSON.stringify(messages[0]).substring(0, 100));
-
-    console.log('[DEBUG] Step 4: Creating session in Prisma...');
-    console.log('[DEBUG] Step 4a: userId type:', typeof userId, 'value:', userId);
-    console.log('[DEBUG] Step 4b: messages type:', typeof messages, 'length:', messages.length);
-    console.log('[DEBUG] Step 4c: extracted:', {});
-    
-    const session = await prisma.conversationSession.create({
-      data: {
-        userId,
-        messages: messages as any,
-        extracted: {} as any,
-        status: 'active',
-      },
-    });
-    
-    console.log('[DEBUG] Step 4d: Session created:', session.id);
-
-    res.json({
-      sessionId: session.id,
-      stage,
-      messages,
-      currentQuestion: question,
-      extracted: {},
-      isComplete: false,
-      questionNumber: 1,
-      totalQuestions: 12,
-    });
-    
-  } catch (err: any) {
-    console.error('[DEBUG] Full error details:', {
-      name: err?.name,
-      message: err?.message,
-      code: err?.code,
-      meta: err?.meta,
-      stack: err?.stack,
-    });
-    res.status(500).json({
-      status: 'error',
-      error: err?.message,
-      code: err?.code,
-      meta: err?.meta,
-      nodeEnv: process.env.NODE_ENV,
-    });
-  }
-});
-
-// DEV ONLY: Create a test user for development
-app.post('/dev/create-test-user', async (req: Request, res: Response) => {
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(403).json({ error: 'Not available in production' });
-  }
-
-  try {
-    const email = 'test@example.com';
-    const password = 'password123';
-    const name = 'Test User';
-
-    // Check if user exists
-    let user = await prisma.user.findUnique({ where: { email } });
-    if (user) {
-      return res.json({ message: 'Test user already exists', user: { id: user.id, email: user.email, name: user.name } });
-    }
-
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const refreshToken = crypto.randomBytes(48).toString('hex');
-
-    // Create user
-    user = await prisma.user.create({
-      data: {
-        email,
-        password: hashedPassword,
-        name,
-        refreshToken,
-      }
-    });
-
-    const token = jwt.sign(
-      { userId: user.id, email: user.email },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    logger.info('Test user created', { userId: user.id, email });
-    res.json({
-      message: 'Test user created',
-      user: { id: user.id, email: user.email, name: user.name },
-      token,
-      refreshToken
-    });
-  } catch (err: any) {
-    logger.error('Failed to create test user', { error: err && err.message ? err.message : String(err) });
-    res.status(500).json({ error: 'Failed to create test user', details: err && err.message ? err.message : undefined });
-  }
-});
 
 // Get monthly usage (SEO/free audits) for a business (returns counts for current month)
 app.get('/businesses/:businessId/usage', authenticateToken, async (req: AuthRequest, res: Response) => {
@@ -843,43 +955,301 @@ function calculateSeoScore(scraped: any): number {
   return Math.min(100, score);
 }
 
+// Helper: Calculate audit scores with a fallback when PageSpeed is unavailable
+function calculateAuditScores(scraped: any, pageSpeed: any) {
+  if (pageSpeed) {
+    const performance = pageSpeed?.performance ? Math.round(pageSpeed.performance * 100) : 0;
+    const seoScore = pageSpeed?.seo ? Math.round(pageSpeed.seo * 100) : 0;
+    const accessibility = pageSpeed?.accessibility ? Math.round(pageSpeed.accessibility * 100) : 0;
+    const bestPractices = calculateSeoScore({ pageSpeed });
+    const mobile = Math.round((performance + accessibility) / 2);
+    return { performance, seoScore, accessibility, bestPractices, mobile };
+  }
+
+  // Fallback heuristic scores from scraped metadata so audits aren't all zero.
+  const hasTitle = !!scraped?.title;
+  const hasDescription = !!scraped?.description;
+  const hasImages = Array.isArray(scraped?.images) && scraped.images.length > 0;
+  const hasContact = !!(scraped?.email || scraped?.phone);
+
+  const performance = Math.min(
+    80,
+    45 + (hasTitle ? 10 : 0) + (hasDescription ? 10 : 0) + (hasImages ? 10 : 0),
+  );
+  const seoScore = calculateSeoScore(scraped);
+  const accessibility = Math.min(
+    80,
+    40 + (hasTitle ? 10 : 0) + (hasDescription ? 10 : 0) + (hasContact ? 10 : 0),
+  );
+  const bestPractices = Math.min(100, Math.round((seoScore + performance) / 2));
+  const mobile = Math.round((performance + accessibility) / 2);
+
+  return { performance, seoScore, accessibility, bestPractices, mobile };
+}
+
 // Fetch PageSpeed Insights (Lighthouse) data via Google API
 async function fetchPageSpeedData(url: string): Promise<any> {
-  try {
-    const apiKey = process.env.GOOGLE_PAGESPEED_API_KEY || process.env.PAGESPEED_API_KEY || '';
-    const endpoint = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
-    const params: any = { url, strategy: 'mobile' };
-    if (apiKey) params.key = apiKey;
-
-    const resp = await axios.get(endpoint, { params, timeout: 20000 });
-    const data = resp.data;
-
-    // Extract a few useful metrics
-    const lighthouse = data.lighthouseResult || {};
-    const categories = lighthouse.categories || {};
-    const audits = lighthouse.audits || {};
-
-    const performance = (categories.performance && categories.performance.score) || null;
-    const seo = (categories.seo && categories.seo.score) || null;
-    const accessibility = (categories.accessibility && categories.accessibility.score) || null;
-
-    const fcp = audits['first-contentful-paint']?.numericValue || null;
-    const lcp = audits['largest-contentful-paint']?.numericValue || null;
-    const cls = audits['cumulative-layout-shift']?.numericValue || null;
-
-    return {
-      raw: data,
-      performance,
-      seo,
-      accessibility,
-      fcp,
-      lcp,
-      cls,
-    };
-  } catch (err) {
-    logger.warn('PageSpeed fetch failed', { error: err?.toString?.() || err });
-    return null;
+  const apiKey = process.env.GOOGLE_PAGESPEED_API_KEY || process.env.PAGESPEED_API_KEY || '';
+  if (!apiKey) {
+    throw new Error('Missing PageSpeed API key');
   }
+
+  const endpoint = new URL('https://www.googleapis.com/pagespeedonline/v5/runPagespeed');
+  endpoint.searchParams.set('url', url);
+  endpoint.searchParams.set('strategy', 'mobile');
+  endpoint.searchParams.set('key', apiKey);
+  // Limit to required categories to reduce payload/latency.
+  endpoint.searchParams.append('category', 'PERFORMANCE');
+  endpoint.searchParams.append('category', 'SEO');
+  endpoint.searchParams.append('category', 'ACCESSIBILITY');
+
+  const timeoutMs = Number(process.env.PAGESPEED_TIMEOUT_MS || 120000);
+  const maxAttempts = Number(process.env.PAGESPEED_MAX_ATTEMPTS || 1);
+
+  let lastErrorMessage = 'Unknown PageSpeed error';
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+      const resp = await fetch(endpoint.toString(), {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      clearTimeout(timeout);
+
+      const data = await resp.json();
+      if (!resp.ok) {
+        const apiMsg = data?.error?.message || data?.error?.status || `HTTP ${resp.status}`;
+        throw new Error(apiMsg);
+      }
+
+      // Extract a few useful metrics
+      const lighthouse = data.lighthouseResult || {};
+      const categories = lighthouse.categories || {};
+      const audits = lighthouse.audits || {};
+
+      const performance = (categories.performance && categories.performance.score) || null;
+      const seo = (categories.seo && categories.seo.score) || null;
+      const accessibility = (categories.accessibility && categories.accessibility.score) || null;
+
+      const fcp = audits['first-contentful-paint']?.numericValue || null;
+      const lcp = audits['largest-contentful-paint']?.numericValue || null;
+      const cls = audits['cumulative-layout-shift']?.numericValue || null;
+
+      return {
+        raw: data,
+        performance,
+        seo,
+        accessibility,
+        fcp,
+        lcp,
+        cls,
+      };
+    } catch (err: any) {
+      const status = err?.status || null;
+      const timeout = err?.name === 'AbortError' || /timed out|aborted/i.test(String(err?.message || ''));
+      lastErrorMessage = err?.message || String(err);
+
+      logger.warn('PageSpeed fetch failed', {
+        attempt,
+        maxAttempts,
+        status,
+        timeout,
+        error: lastErrorMessage,
+      });
+
+      const retryable = timeout || status === 429 || (typeof status === 'number' && status >= 500);
+      if (!retryable || attempt === maxAttempts) break;
+
+      const backoffMs = attempt * 1500;
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+
+  throw new Error(`PageSpeed API failed after ${maxAttempts} attempts: ${lastErrorMessage}`);
+}
+
+function isPubliclyReachableAuditUrl(rawUrl?: string | null): boolean {
+  if (!rawUrl) return false;
+  try {
+    const parsed = new URL(rawUrl);
+    const hostname = parsed.hostname.toLowerCase();
+
+    if (hostname === 'localhost' || hostname === '0.0.0.0' || hostname === '127.0.0.1') {
+      return false;
+    }
+    if (hostname.endsWith('.local')) return false;
+    if (hostname.startsWith('10.')) return false;
+    if (hostname.startsWith('192.168.')) return false;
+    if (
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type AutoAuditBusiness = {
+  id: string;
+  userId: string;
+  name: string;
+  slug: string | null;
+  publishedUrl: string | null;
+  isPublished: boolean;
+};
+
+async function runAutoPageSpeedAuditForBusiness(
+  business: AutoAuditBusiness,
+  minIntervalMinutes: number,
+): Promise<'audited' | 'skipped_recent' | 'skipped_url' | 'failed'> {
+  const targetUrl = business.publishedUrl;
+  if (!business.isPublished || !isPubliclyReachableAuditUrl(targetUrl)) {
+    return 'skipped_url';
+  }
+
+  const minMs = Math.max(1, minIntervalMinutes) * 60 * 1000;
+  const latest = await prisma.seoAudit.findFirst({
+    where: { userId: business.userId, businessId: business.id },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true },
+  });
+
+  if (latest && Date.now() - new Date(latest.createdAt).getTime() < minMs) {
+    return 'skipped_recent';
+  }
+
+  try {
+    const pageSpeed = await fetchPageSpeedData(targetUrl!);
+    const { performance, seoScore, accessibility, bestPractices } =
+      calculateAuditScores({}, pageSpeed);
+
+    const issues: any = { critical: [], warnings: [], opportunities: [] };
+    if (performance < 40) issues.critical.push('Low performance score');
+    if (seoScore < 50) issues.warnings.push('SEO score is low');
+
+    const recommendations = generateAuditRecommendations({
+      seoKeywords: [],
+      heroHeadline: business.name || '',
+    });
+
+    await prisma.seoAudit.create({
+      data: {
+        userId: business.userId,
+        businessId: business.id,
+        url: targetUrl!,
+        performance,
+        seo: seoScore,
+        accessibility,
+        bestPractices,
+        issues,
+        recommendations,
+        raw: {
+          source: 'auto_pagespeed_scheduler',
+          pageSpeed,
+          auditedAt: new Date().toISOString(),
+        } as any,
+      },
+    });
+    return 'audited';
+  } catch (error) {
+    logger.warn('Auto PageSpeed audit failed for business', {
+      businessId: business.id,
+      businessName: business.name,
+      url: targetUrl,
+      error: String(error),
+    });
+    return 'failed';
+  }
+}
+
+async function runAutoPageSpeedAuditCycle() {
+  const minIntervalMinutes = Number(
+    process.env.AUTO_PAGESPEED_AUDIT_MIN_INTERVAL_MINUTES || 60,
+  );
+  const businesses = await prisma.business.findMany({
+    where: { isPublished: true },
+    select: {
+      id: true,
+      userId: true,
+      name: true,
+      slug: true,
+      publishedUrl: true,
+      isPublished: true,
+    },
+  });
+
+  if (!businesses.length) return;
+
+  let audited = 0;
+  let skippedRecent = 0;
+  let skippedUrl = 0;
+  let failed = 0;
+
+  for (const business of businesses) {
+    const result = await runAutoPageSpeedAuditForBusiness(
+      business as AutoAuditBusiness,
+      minIntervalMinutes,
+    );
+    if (result === 'audited') audited += 1;
+    if (result === 'skipped_recent') skippedRecent += 1;
+    if (result === 'skipped_url') skippedUrl += 1;
+    if (result === 'failed') failed += 1;
+  }
+
+  logger.info('Auto PageSpeed audit cycle completed', {
+    total: businesses.length,
+    audited,
+    skippedRecent,
+    skippedUrl,
+    failed,
+  });
+}
+
+let autoAuditTimer: NodeJS.Timeout | null = null;
+let autoAuditRunning = false;
+
+function startAutoPageSpeedAuditScheduler() {
+  const enabled = process.env.AUTO_PAGESPEED_AUDIT_ENABLED !== 'false';
+  if (!enabled) {
+    console.log('[AutoAudit] AUTO_PAGESPEED_AUDIT_ENABLED=false, scheduler disabled');
+    return;
+  }
+
+  const intervalMinutes = Math.max(
+    5,
+    Number(process.env.AUTO_PAGESPEED_AUDIT_INTERVAL_MINUTES || 30),
+  );
+
+  const run = async () => {
+    if (autoAuditRunning) return;
+    autoAuditRunning = true;
+    try {
+      await runAutoPageSpeedAuditCycle();
+    } catch (error) {
+      logger.warn('Auto PageSpeed scheduler cycle error', { error: String(error) });
+    } finally {
+      autoAuditRunning = false;
+    }
+  };
+
+  void run();
+  autoAuditTimer = setInterval(() => {
+    void run();
+  }, intervalMinutes * 60 * 1000);
+  if (typeof autoAuditTimer.unref === 'function') autoAuditTimer.unref();
+
+  console.log(
+    `[AutoAudit] PageSpeed scheduler started (interval=${intervalMinutes}m, minInterval=${process.env.AUTO_PAGESPEED_AUDIT_MIN_INTERVAL_MINUTES || 60}m)`,
+  );
 }
 
 // Helper: Calculate brand audit score
@@ -945,13 +1315,16 @@ app.post('/seo-audit', authenticateToken, async (req: AuthRequest, res: Response
 
     // Run scraping + PageSpeed
     const scraped = await (async () => { try { return await scrapeWebsite(url); } catch { return {}; } })();
-    const pageSpeed = await fetchPageSpeedData(url);
+    let pageSpeed: any;
+    try {
+      pageSpeed = await fetchPageSpeedData(url);
+    } catch (err: any) {
+      const message = err?.message || 'Failed to fetch PageSpeed data';
+      return res.status(502).json({ error: message });
+    }
 
-    const performance = pageSpeed?.performance ? Math.round(pageSpeed.performance * 100) : 0;
-    const seoScore = pageSpeed?.seo ? Math.round(pageSpeed.seo * 100) : 0;
-    const accessibility = pageSpeed?.accessibility ? Math.round(pageSpeed.accessibility * 100) : 0;
-
-    const bestPractices = calculateSeoScore({ pageSpeed });
+    const { performance, seoScore, accessibility, bestPractices } =
+      calculateAuditScores(scraped, pageSpeed);
 
     // Issues/opportunities - simple extraction from audits
     const issues = { critical: [], warnings: [], opportunities: [] } as any;
@@ -1076,14 +1449,16 @@ app.post('/seo-audit-public', publicSeoAuditLimiter, async (req: Request, res: R
 
     // Run scraping + PageSpeed
     const scraped = await (async () => { try { return await scrapeWebsite(normalizedUrl); } catch { return {}; } })();
-    const pageSpeed = await fetchPageSpeedData(normalizedUrl);
+    let pageSpeed: any;
+    try {
+      pageSpeed = await fetchPageSpeedData(normalizedUrl);
+    } catch (err: any) {
+      const message = err?.message || 'Failed to fetch PageSpeed data';
+      return res.status(502).json({ error: message });
+    }
 
-    const performance = pageSpeed?.performance ? Math.round(pageSpeed.performance * 100) : 0;
-    const seoScore = pageSpeed?.seo ? Math.round(pageSpeed.seo * 100) : 0;
-    const accessibility = pageSpeed?.accessibility ? Math.round(pageSpeed.accessibility * 100) : 0;
-    const mobile = Math.round((performance + accessibility) / 2); // Mobile score = avg of performance and accessibility
-
-    const bestPractices = calculateSeoScore({ pageSpeed });
+    const { performance, seoScore, accessibility, bestPractices, mobile } =
+      calculateAuditScores(scraped, pageSpeed);
 
     // Issues/opportunities - simple extraction from audits
     const issues: any = { critical: [], warnings: [], opportunities: [] };
@@ -1176,7 +1551,13 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
 
     // Run scraping + PageSpeed
     const scraped = await (async () => { try { return await scrapeWebsite(url); } catch { return {}; } })();
-    const pageSpeed = await fetchPageSpeedData(url);
+    let pageSpeed: any;
+    try {
+      pageSpeed = await fetchPageSpeedData(url);
+    } catch (err: any) {
+      const message = err?.message || 'Failed to fetch PageSpeed data';
+      return res.status(502).json({ error: message });
+    }
 
     const performance = pageSpeed?.performance ? Math.round(pageSpeed.performance * 100) : 0;
     const seoScore = pageSpeed?.seo ? Math.round(pageSpeed.seo * 100) : 0;
@@ -1287,7 +1668,7 @@ app.post('/conversation/start', authenticateToken, conversationLimiter, async (r
         {
           role: 'assistant',
           content: assistantMessage,
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(),
         },
       ];
 
@@ -1317,14 +1698,14 @@ app.post('/conversation/start', authenticateToken, conversationLimiter, async (r
         {
           role: 'assistant',
           content: assistantMessage,
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(),
         },
       ],
       currentQuestion: assistantMessage,
       extracted: {},
       isComplete: false,
       questionNumber: 1,
-      totalQuestions: 12,
+      totalQuestions: 7,
     });
     
   } catch (err: any) {
@@ -1409,20 +1790,25 @@ app.post('/conversation/message', authenticateToken, conversationLimiter, async 
     // Get current stage
     const currentStage = getCurrentStage(extracted);
 
-    // Validate and extract data from user message
-    const dataValidation = isStageDataValid(currentStage, { ...extracted });
-    
-    // If current stage data is invalid, ask again
+    const accept = req.headers.accept || '';
+    const isSSE = accept.includes('text/event-stream');
+
+    // Validate the candidate state produced by this user message.
+    const candidateExtracted = extractDataFromMessage(trimmedMessage, currentStage, extracted);
+    const dataValidation = isStageDataValid(currentStage, candidateExtracted);
+
+    // If user input is invalid for the current stage, ask again.
     let nextStage = currentStage;
     if (!dataValidation.valid && currentStage !== 'greeting') {
+      const assistantMessage = `${dataValidation.message || 'Please provide a valid response.'} ${generateNextQuestion(currentStage)}`;
       const messages = [...(session.messages as any), {
         role: 'user',
         content: trimmedMessage,
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
       }, {
         role: 'assistant',
-        content: dataValidation.message || 'Please provide a valid response. ' + generateNextQuestion(currentStage),
-        timestamp: new Date(),
+        content: assistantMessage,
+        timestamp: new Date().toISOString(),
       }];
 
       await prisma.conversationSession.update({
@@ -1430,16 +1816,37 @@ app.post('/conversation/message', authenticateToken, conversationLimiter, async 
         data: { messages: messages as any },
       });
 
+      if (isSSE) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders?.();
+        sseSend(res, JSON.stringify({ delta: assistantMessage }));
+        sseSend(res, JSON.stringify({
+          done: true,
+          payload: {
+            sessionId,
+            stage: currentStage,
+            extracted,
+            isComplete: false,
+            totalQuestions: 7,
+            assistantMessage,
+          },
+        }), 'done');
+        return res.end();
+      }
+
       return res.json({
         sessionId,
         messages,
         stage: currentStage,
         error: dataValidation.message,
+        totalQuestions: 7,
       });
     }
 
-    // Extract data from valid user message
-    extracted = extractDataFromMessage(trimmedMessage, currentStage, extracted);
+    // Persist candidate extracted data from this valid message.
+    extracted = candidateExtracted;
 
     // Determine next stage
     nextStage = getCurrentStage(extracted);
@@ -1448,30 +1855,270 @@ app.post('/conversation/message', authenticateToken, conversationLimiter, async 
     let assistantContent = '';
     
     if (nextStage === 'summary') {
-      // Onboarding complete - generate a summary message
-      assistantContent = generateSummaryMessage(extracted);
+      // Onboarding complete - keep rule-based flow, then refine extracted data
+      // with streaming-capable model output for higher quality business understanding.
+      try {
+        const userConfirmed = isAffirmativeConfirmation(trimmedMessage);
+        extracted = await refineBusinessUnderstandingWithModel(
+          extracted,
+          [...(session.messages as any), { role: 'user', content: trimmedMessage }]
+        );
+        if (!extracted.seoKeywords || extracted.seoKeywords.length < 5) {
+          const descriptionSeed = [
+            extracted.name,
+            extracted.category,
+            extracted.location,
+            (extracted.services || []).join(', '),
+            extracted.valueProposition,
+            extracted.targetAudience,
+          ]
+            .filter(Boolean)
+            .join(' ');
+          extracted.seoKeywords = generateSEOKeywords(extracted.name || 'Business', descriptionSeed);
+        }
+        if (isSSE) {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.flushHeaders?.();
+
+          const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini';
+          const prompt = buildConversationSummaryPrompt(extracted);
+          try {
+            const stream = await (OpenAIClient as any).responses.stream({
+              model,
+              input: prompt,
+            });
+
+            for await (const event of stream as any) {
+              if (!event) continue;
+              const deltaCandidate =
+                event?.delta?.content ??
+                event?.delta?.text ??
+                event?.text ??
+                event?.output_text ??
+                event?.delta;
+              const delta =
+                typeof deltaCandidate === 'string'
+                  ? deltaCandidate
+                  : Array.isArray(deltaCandidate)
+                    ? deltaCandidate.join('')
+                    : '';
+              if (delta) {
+                assistantContent += delta;
+                sseSend(res, JSON.stringify({ delta }));
+              }
+            }
+          } catch (err) {
+            assistantContent = generateSummaryMessage(extracted);
+            sseSend(res, JSON.stringify({ delta: assistantContent }));
+          }
+
+          if (!assistantContent || !assistantContent.trim()) {
+            assistantContent = generateSummaryMessage(extracted);
+          }
+
+          const normalizedExtracted = normalizeOnboardingExtracted(extracted);
+          const messages = [...(session.messages as any), {
+            role: 'user',
+            content: trimmedMessage,
+            timestamp: new Date().toISOString(),
+          }, {
+            role: 'assistant',
+            content: assistantContent.trim(),
+            timestamp: new Date().toISOString(),
+          }];
+
+          const validation = validateAIResponse(normalizedExtracted);
+          let finalStatus = 'active';
+          let finalExtracted = normalizedExtracted;
+          if (validation.valid && userConfirmed) {
+            finalStatus = 'completed';
+            finalExtracted = validation.data;
+          }
+
+          await prisma.conversationSession.update({
+            where: { id: sessionId },
+            data: {
+              messages: messages as any,
+              extracted: finalExtracted as any,
+              status: finalStatus,
+            },
+          });
+
+          sseSend(res, JSON.stringify({
+            done: true,
+            payload: {
+              sessionId,
+              stage: nextStage,
+              extracted: finalExtracted,
+              isComplete: finalStatus === 'completed',
+              totalQuestions: 7,
+              assistantMessage: assistantContent.trim(),
+            },
+          }), 'done');
+          return res.end();
+        }
+
+        try {
+          const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini';
+          const prompt = buildConversationSummaryPrompt(extracted);
+          const resp = await (OpenAIClient as any).responses.create({
+            model,
+            input: prompt,
+          });
+          const text =
+            (resp as any)?.output_text ||
+            (resp as any)?.output?.[0]?.content?.[0]?.text ||
+            '';
+          assistantContent = text?.trim() || generateSummaryMessage(extracted);
+        } catch {
+          assistantContent = generateSummaryMessage(extracted);
+        }
+      } catch (err) {
+        logger.warn('Conversation summary generation failed; using fallback.', { error: String(err) });
+        assistantContent = generateSummaryMessage(extracted);
+      }
     } else {
-      // Continue to next question
-      assistantContent = generateNextQuestion(nextStage);
+      // AI-driven next question (streaming when requested)
+      const requiredQuestion = generateNextQuestion(nextStage);
+      const recentMessages = (session.messages as any[] || []).slice(-6).map((m: any) => ({
+        role: m?.role || 'user',
+        content: String(m?.content || ''),
+      }));
+
+      if (isSSE) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders?.();
+
+        const prompt = buildConversationQuestionPrompt({
+          stage: nextStage,
+          requiredQuestion,
+          extracted,
+          recentMessages,
+        });
+        const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini';
+
+        try {
+          const stream = await (OpenAIClient as any).responses.stream({
+            model,
+            input: prompt,
+          });
+
+          for await (const event of stream as any) {
+            if (!event) continue;
+            const deltaCandidate =
+              event?.delta?.content ??
+              event?.delta?.text ??
+              event?.text ??
+              event?.output_text ??
+              event?.delta;
+            const delta =
+              typeof deltaCandidate === 'string'
+                ? deltaCandidate
+                : Array.isArray(deltaCandidate)
+                  ? deltaCandidate.join('')
+                  : '';
+            if (delta) {
+              assistantContent += delta;
+              sseSend(res, JSON.stringify({ delta }));
+            }
+          }
+        } catch (err) {
+          assistantContent = requiredQuestion;
+          sseSend(res, JSON.stringify({ delta: assistantContent }));
+        }
+
+        if (!assistantContent || !assistantContent.trim()) {
+          assistantContent = requiredQuestion;
+        }
+
+        const messages = [...(session.messages as any), {
+          role: 'user',
+          content: trimmedMessage,
+          timestamp: new Date().toISOString(),
+        }, {
+          role: 'assistant',
+          content: assistantContent.trim(),
+          timestamp: new Date().toISOString(),
+        }];
+
+        const validation = validateAIResponse(extracted);
+        let finalStatus = 'active';
+        let finalExtracted = extracted;
+        if (nextStage === 'summary' && validation.valid) {
+          finalStatus = 'completed';
+          finalExtracted = validation.data;
+        }
+
+        await prisma.conversationSession.update({
+          where: { id: sessionId },
+          data: {
+            messages: messages as any,
+            extracted: finalExtracted as any,
+            status: finalStatus,
+          },
+        });
+
+        sseSend(res, JSON.stringify({
+          done: true,
+          payload: {
+            sessionId,
+            stage: nextStage,
+            extracted: finalExtracted,
+            isComplete: finalStatus === 'completed',
+            totalQuestions: 7,
+            assistantMessage: assistantContent.trim(),
+          },
+        }), 'done');
+        return res.end();
+      }
+
+      try {
+        const prompt = buildConversationQuestionPrompt({
+          stage: nextStage,
+          requiredQuestion,
+          extracted,
+          recentMessages,
+        });
+        const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini';
+        const resp = await (OpenAIClient as any).responses.create({
+          model,
+          input: prompt,
+        });
+        const text =
+          (resp as any)?.output_text ||
+          (resp as any)?.output?.[0]?.content?.[0]?.text ||
+          '';
+        assistantContent = text?.trim() || requiredQuestion;
+      } catch {
+        assistantContent = requiredQuestion;
+      }
     }
 
     // Build updated messages array
     const messages = [...(session.messages as any), {
       role: 'user',
       content: trimmedMessage,
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     }, {
       role: 'assistant',
       content: assistantContent,
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     }];
 
     // Validate extracted data with Zod schema
-    const validation = validateAIResponse(extracted);
+    const normalizedExtracted = nextStage === 'summary'
+      ? normalizeOnboardingExtracted(extracted)
+      : extracted;
+    const validation = validateAIResponse(normalizedExtracted);
     let finalStatus = 'active';
-    let finalExtracted = extracted;
+    let finalExtracted = normalizedExtracted;
 
-    if (nextStage === 'summary' && validation.valid) {
+    const userConfirmed = nextStage === 'summary' && isAffirmativeConfirmation(trimmedMessage);
+    if (nextStage === 'summary' && validation.valid && userConfirmed) {
       finalStatus = 'completed';
       finalExtracted = validation.data;
     }
@@ -1493,10 +2140,20 @@ app.post('/conversation/message', authenticateToken, conversationLimiter, async 
       extracted: finalExtracted,
       isComplete: finalStatus === 'completed',
       validationErrors: validation.valid ? undefined : validation.errors,
+      totalQuestions: 7,
     });
   } catch (err) {
     logger.error('Conversation message error', { error: String(err) });
-    res.status(500).json({ error: 'Failed to process message' });
+    res.status(500).json({
+      error: 'Failed to process message',
+      ...(process.env.NODE_ENV === 'development' && {
+        details: {
+          message: (err as any)?.message,
+          code: (err as any)?.code,
+          type: (err as any)?.name,
+        },
+      }),
+    });
   }
 });
 
@@ -1574,16 +2231,22 @@ app.post('/conversation/session/:sessionId/complete', authenticateToken, async (
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // Validate the extracted data
-    const validation = validateAIResponse(session.extracted);
-    if (!validation.valid) {
-      return res.status(400).json({
-        error: 'Invalid business data',
-        details: validation.errors,
-      });
+    let extracted = normalizeOnboardingExtracted((session.extracted as any) || {});
+    if (!extracted.seoKeywords || extracted.seoKeywords.length < 5) {
+      const descriptionSeed = [
+        extracted.name,
+        extracted.category,
+        extracted.location,
+        (extracted.services || []).join(', '),
+        extracted.valueProposition,
+        extracted.targetAudience,
+      ]
+        .filter(Boolean)
+        .join(' ');
+      extracted.seoKeywords = generateSEOKeywords(extracted.name || 'Business', descriptionSeed);
     }
 
-    // Verify business ownership
+    // Verify business ownership before writing any data
     const business = await prisma.business.findUnique({
       where: { id: businessId },
     });
@@ -1592,8 +2255,66 @@ app.post('/conversation/session/:sessionId/complete', authenticateToken, async (
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
+    // Validate the extracted data
+    const validation = validateAIResponse(extracted);
+    if (!validation.valid) {
+      if (process.env.NODE_ENV !== 'production') {
+        const analysis = (business.analysis as any) || {};
+        analysis.businessUnderstanding = extracted;
+        await prisma.business.update({
+          where: { id: businessId },
+          data: { analysis: analysis as any },
+        });
+        await prisma.conversationSession.update({
+          where: { id: sessionIdStr },
+          data: { status: 'completed' },
+        });
+        return res.json({
+          message: 'Business data saved with warnings (dev mode)',
+          businessId,
+          extracted,
+          warnings: validation.errors,
+        });
+      }
+      return res.status(400).json({
+        error: 'Invalid business data',
+        details: validation.errors,
+      });
+    }
+
+    // Optionally scrape source URL provided in conversation (website/Instagram)
+    const sourceUrl = String((validation.data as any)?.sourceUrl || extracted?.sourceUrl || '').trim();
+    let scrapedFromConversation: any = {};
+    if (sourceUrl && !['none', 'no', 'n/a', 'na'].includes(sourceUrl.toLowerCase())) {
+      try {
+        const ig = parseInstagramUrl(sourceUrl);
+        if (ig.valid && ig.username) {
+          const profile = await scrapeInstagramProfile(ig.username);
+          scrapedFromConversation = { ...(instagramProfileToBusinessData(profile) as any), instagramUrl: sourceUrl };
+        } else {
+          const normalizedUrl = /^https?:\/\//i.test(sourceUrl) ? sourceUrl : `https://${sourceUrl}`;
+          const websiteScraped = await scrapeWebsite(normalizedUrl);
+          scrapedFromConversation = {
+            ...websiteScraped,
+            url: normalizedUrl,
+          };
+        }
+      } catch (err) {
+        logger.warn('Conversation source URL scrape failed', { sourceUrl, error: String(err) });
+      }
+    }
+
     // Update business with extracted data
     const analysis = (business.analysis as any) || {};
+    const existingScraped = analysis.scraped || {};
+    const mergedScraped = {
+      ...existingScraped,
+      ...scrapedFromConversation,
+      images: [
+        ...new Set([...(existingScraped.images || []), ...(scrapedFromConversation.images || [])]),
+      ],
+    };
+    analysis.scraped = mergedScraped;
     analysis.businessUnderstandingValidated = validation.data;
 
     await prisma.business.update({
@@ -2271,7 +2992,7 @@ app.post('/analyze-business', async (req: Request, res: Response) => {
 });
 
 // Free business audit (no auth required)
-app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
+app.post('/free-audit-legacy', publicLimiter, async (req: Request, res: Response) => {
   try {
     const { url, instagramUrl, description } = req.body;
     if (!url && !instagramUrl && !description) {
@@ -2289,7 +3010,13 @@ app.post('/free-audit', publicLimiter, async (req: Request, res: Response) => {
       scrapedData.url = url;
 
       // Fetch PageSpeed / Lighthouse data and attach if available
-      const pageSpeed = await fetchPageSpeedData(url);
+    let pageSpeed: any;
+    try {
+      pageSpeed = await fetchPageSpeedData(url);
+    } catch (err: any) {
+      const message = err?.message || 'Failed to fetch PageSpeed data';
+      return res.status(502).json({ error: message });
+    }
       if (pageSpeed) {
         scrapedData.pageSpeed = pageSpeed;
       }
@@ -2541,8 +3268,12 @@ app.post('/businesses/:id/generate-config', authenticateToken, async (req: AuthR
       return res.status(400).json({ error: 'Business understanding not found. Complete onboarding first.' });
     }
 
+    const requestedTemplateId = paramToString((req.body as any)?.templateId);
+    const excludeTemplateId = paramToString((req.body as any)?.excludeTemplateId);
+    const variationSeed = paramToString((req.body as any)?.variationSeed) || `${Date.now()}`;
+
     // Get or select template
-    let templateId = business.templateId || req.body.templateId;
+    let templateId = requestedTemplateId || business.templateId || undefined;
     if (!templateId) {
       const templateResult = selectTemplate(
         bu.category || 'general',
@@ -2551,6 +3282,11 @@ app.post('/businesses/:id/generate-config', authenticateToken, async (req: AuthR
         !!(bu.imageAssets?.hero)
       );
       templateId = templateResult.template.id;
+    }
+    if (excludeTemplateId && templateId === excludeTemplateId) {
+      const fallbackOrder = ['service-heavy', 'image-heavy', 'luxury'];
+      const next = fallbackOrder.find((id) => id !== excludeTemplateId);
+      if (next) templateId = next;
     }
 
     // Generate config
@@ -2571,16 +3307,25 @@ app.post('/businesses/:id/generate-config', authenticateToken, async (req: AuthR
         imageAssets: bu.imageAssets,
       },
       templateId,
+      variationSeed,
       scrapedData: analysis.scraped || {},
     });
 
-    // Save to business
+    // Save to business (schema stores generated config + analysis JSON)
+    const nextAnalysis = {
+      ...analysis,
+      templateSelection: {
+        ...(analysis?.templateSelection || {}),
+        templateId,
+        selectedAt: new Date().toISOString(),
+      },
+    } as any;
+
     await prisma.business.update({
       where: { id: businessId },
       data: {
-        templateId,
-        websiteConfig: config as any,
         generatedConfig: config as any,
+        analysis: nextAnalysis as any,
       },
     });
 
@@ -2605,32 +3350,48 @@ app.post('/businesses/:id/enrich-images', authenticateToken, async (req: AuthReq
     const bu = analysis.businessUnderstandingValidated || analysis.businessUnderstanding || {};
 
     // Enrich images
+    const enrichedCategoryQuery = [bu.category || 'business', ...(Array.isArray(bu.services) ? bu.services.slice(0, 2) : [])]
+      .filter(Boolean)
+      .join(' ');
+
     const result = await enrichImages({
       scrapedImages: analysis.scraped?.images,
-      category: bu.category || 'business',
+      category: enrichedCategoryQuery || bu.category || 'business',
       seoKeywords: bu.seoKeywords || [],
       businessName: bu.name || business.name,
     });
+
+    // Persist image assets inside analysis/business understanding records
+    const updatedAnalysis = { ...analysis } as any;
+    if (updatedAnalysis.businessUnderstandingValidated) {
+      updatedAnalysis.businessUnderstandingValidated = {
+        ...updatedAnalysis.businessUnderstandingValidated,
+        imageAssets: result.assets,
+      };
+    }
+    if (updatedAnalysis.businessUnderstanding) {
+      updatedAnalysis.businessUnderstanding = {
+        ...updatedAnalysis.businessUnderstanding,
+        imageAssets: result.assets,
+      };
+    }
+    updatedAnalysis.imageEnrichment = {
+      source: result.source,
+      count: result.count,
+      enrichedAt: new Date(),
+    };
 
     // Update business
     await prisma.business.update({
       where: { id: businessId },
       data: {
-        imageAssets: result.assets as any,
-        analysis: {
-          ...analysis,
-          imageEnrichment: {
-            source: result.source,
-            count: result.count,
-            enrichedAt: new Date(),
-          },
-        },
+        analysis: updatedAnalysis as any,
       },
     });
 
-    // Also update website config if exists
-    if (business.websiteConfig) {
-      const config = business.websiteConfig as any;
+    // Also update generated config if exists
+    if (business.generatedConfig) {
+      const config = business.generatedConfig as any;
       config.hero = config.hero || {};
       config.hero.heroImage = result.assets.hero;
       if (config.about) {
@@ -2638,7 +3399,7 @@ app.post('/businesses/:id/enrich-images', authenticateToken, async (req: AuthReq
       }
       await prisma.business.update({
         where: { id: businessId },
-        data: { websiteConfig: config },
+        data: { generatedConfig: config },
       });
     }
 
@@ -2822,16 +3583,25 @@ app.get('/businesses/:id/website-status', authenticateToken, async (req: AuthReq
       failed: 'Generation failed. Please try again.',
     };
 
-    const status = business.generationStatus || 'idle';
-    const step = business.generationStep || status;
+    const analysis = (business.analysis || {}) as any;
+    const status = analysis?.generation?.status || 'idle';
+    const step = analysis?.generation?.step || status;
+    const imageAssets =
+      analysis?.businessUnderstandingValidated?.imageAssets ||
+      analysis?.businessUnderstanding?.imageAssets ||
+      null;
+    const templateId =
+      analysis?.templateSelection?.templateId ||
+      (business.generatedConfig as any)?.templateId ||
+      null;
 
     res.json({
       status,
       step,
       message: stepMessages[step] || stepMessages[status] || 'Processing...',
-      websiteConfig: status === 'completed' ? business.websiteConfig : null,
-      templateId: business.templateId,
-      imageAssets: business.imageAssets,
+      websiteConfig: status === 'completed' ? business.generatedConfig : null,
+      templateId,
+      imageAssets,
     });
   } catch (err) {
     logger.error('Get website status error', { error: String(err) });
@@ -2849,15 +3619,25 @@ app.get('/businesses/:id/website-config', authenticateToken, async (req: AuthReq
     if (!business) return res.status(404).json({ error: 'Business not found' });
     if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
 
-    if (!business.websiteConfig) {
+    if (!business.generatedConfig) {
       return res.status(404).json({ error: 'Website config not generated yet' });
     }
 
+    const analysis = (business.analysis || {}) as any;
+    const templateId =
+      analysis?.templateSelection?.templateId ||
+      (business.generatedConfig as any)?.templateId ||
+      null;
+    const imageAssets =
+      analysis?.businessUnderstandingValidated?.imageAssets ||
+      analysis?.businessUnderstanding?.imageAssets ||
+      null;
+
     res.json({
-      config: business.websiteConfig,
-      templateId: business.templateId,
-      imageAssets: business.imageAssets,
-      generationStatus: business.generationStatus,
+      config: business.generatedConfig,
+      templateId,
+      imageAssets,
+      generationStatus: analysis?.generation?.status || 'ready',
     });
   } catch (err) {
     logger.error('Get website config error', { error: String(err) });
@@ -3063,6 +3843,15 @@ app.post('/businesses', authenticateToken, async (req: AuthRequest, res: Respons
     }
 
     const userId = req.userId!;
+    let safeAnalysis: any = analysis;
+    if (analysis && typeof analysis === 'object') {
+      try {
+        safeAnalysis = JSON.parse(JSON.stringify(analysis));
+      } catch {
+        safeAnalysis = undefined;
+      }
+    }
+
     const business = await prisma.business.create({
       data: {
         userId,
@@ -3070,7 +3859,7 @@ app.post('/businesses', authenticateToken, async (req: AuthRequest, res: Respons
         url,
         description,
         publishedUrl: `https://${Date.now()}.salesape.ai/web`,
-        analysis,
+        analysis: safeAnalysis,
       }
     });
 
@@ -3078,7 +3867,31 @@ app.post('/businesses', authenticateToken, async (req: AuthRequest, res: Respons
     res.status(201).json(business);
   } catch (err) {
     logger.error('Business creation error', { error: err });
-    res.status(500).json({ error: 'Failed to create business' });
+
+    if (isDevelopment) {
+      try {
+        const { url, name, description } = req.body;
+        const fallback = await prisma.business.create({
+          data: {
+            userId: req.userId!,
+            name: name || 'My Business',
+            url,
+            description,
+            publishedUrl: `https://${Date.now()}.salesape.ai/web`,
+          },
+        });
+        return res.status(201).json(fallback);
+      } catch (fallbackErr) {
+        logger.error('Business creation fallback failed', { error: fallbackErr });
+      }
+    }
+
+    res.status(500).json({
+      error: 'Failed to create business',
+      ...(process.env.NODE_ENV === 'development' && {
+        details: (err as any)?.message || String(err),
+      }),
+    });
   }
 });
 
@@ -3126,16 +3939,38 @@ app.patch('/businesses/:id', authenticateToken, async (req: AuthRequest, res: Re
     const userId = req.userId!;
     if (business.userId !== userId) return res.status(403).json({ error: 'Unauthorized' });
 
-    const { name, description, analysis, branding } = req.body as any;
+    const {
+      name,
+      description,
+      analysis,
+      branding,
+      phone,
+      address,
+      generatedConfig,
+      isPublished,
+      publishedUrl,
+      publishedAt,
+    } = req.body as any;
     const data: any = {};
     if (typeof name === 'string') data.name = name;
     if (typeof description === 'string') data.description = description;
+    if (typeof phone === 'string') data.phone = phone;
+    if (typeof address === 'string') data.address = address;
     if (analysis && typeof analysis === 'object' && analysis !== null) {
       data.analysis = Object.assign({}, (business.analysis || {}), analysis as Record<string, any>);
     }
     if (branding && typeof branding === 'object' && branding !== null) {
       const existingConfig = (business.generatedConfig as Record<string, any>) || {};
       data.generatedConfig = Object.assign({}, existingConfig, { branding: Object.assign({}, existingConfig.branding || {}, branding as Record<string, any>) });
+    }
+    if (generatedConfig && typeof generatedConfig === 'object' && generatedConfig !== null) {
+      const existingConfig = (business.generatedConfig as Record<string, any>) || {};
+      data.generatedConfig = Object.assign({}, existingConfig, generatedConfig as Record<string, any>);
+    }
+    if (typeof isPublished === 'boolean') data.isPublished = isPublished;
+    if (publishedUrl === null || typeof publishedUrl === 'string') data.publishedUrl = publishedUrl;
+    if (publishedAt === null || typeof publishedAt === 'string' || publishedAt instanceof Date) {
+      data.publishedAt = publishedAt ? new Date(publishedAt) : null;
     }
 
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'No valid fields to update' });
@@ -3216,6 +4051,59 @@ app.delete('/businesses/:id', authenticateToken, async (req: AuthRequest, res: R
       details: errorDetails,
       code: err?.code
     });
+  }
+});
+
+// Upload image asset for website preview editing
+app.post('/businesses/:id/assets/upload-image', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = paramToString(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Business id is required' });
+
+    const business = await prisma.business.findUnique({ where: { id } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const { fileName, mimeType, dataBase64 } = req.body || {};
+    if (!fileName || !mimeType || !dataBase64) {
+      return res.status(400).json({ error: 'fileName, mimeType, and dataBase64 are required' });
+    }
+
+    const type = String(mimeType).toLowerCase();
+    if (!type.startsWith('image/')) {
+      return res.status(400).json({ error: 'Only image files are supported' });
+    }
+
+    const base64Payload = String(dataBase64).includes(',')
+      ? String(dataBase64).split(',').pop()!
+      : String(dataBase64);
+    const fileBuffer = Buffer.from(base64Payload, 'base64');
+
+    const maxBytes = 10 * 1024 * 1024;
+    if (!fileBuffer.length || fileBuffer.length > maxBytes) {
+      return res.status(400).json({ error: 'Image must be between 1 byte and 10MB' });
+    }
+
+    const safeName = String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `website-images/${id}/${Date.now()}-${safeName}`;
+    const upload = await storageService.uploadFile('ASSETS', storagePath, fileBuffer, {
+      contentType: String(mimeType),
+      upsert: false,
+      metadata: {
+        source: 'website_preview_edit',
+        businessId: id,
+        originalFileName: safeName,
+      },
+    });
+
+    res.status(201).json({
+      message: 'Image uploaded successfully',
+      url: upload.publicUrl,
+      storagePath: upload.path,
+    });
+  } catch (err) {
+    logger.error('Website image upload error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to upload image' });
   }
 });
 
@@ -4153,6 +5041,92 @@ app.post('/website/:slug/leads', publicLimiter, async (req: Request, res: Respon
 // PHASE 3A: CONTENT INPUT (CONTENT STUDIO) ENDPOINTS
 // ============================================================================
 
+// POST /businesses/:businessId/content-inputs/upload - Upload local file and create content input
+app.post('/businesses/:businessId/content-inputs/upload', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const {
+      type,
+      title,
+      fileName,
+      mimeType,
+      dataBase64,
+      metadata,
+    } = req.body || {};
+
+    if (!businessId) return res.status(400).json({ error: 'Business id is required' });
+    if (!type || !fileName || !mimeType || !dataBase64) {
+      return res.status(400).json({ error: 'type, fileName, mimeType, and dataBase64 are required' });
+    }
+    if (!['video', 'audio'].includes(String(type))) {
+      return res.status(400).json({ error: 'Upload endpoint supports only video/audio types' });
+    }
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+    if (business.userId !== req.userId) return res.status(403).json({ error: 'Unauthorized' });
+
+    const base64Payload = String(dataBase64).includes(',')
+      ? String(dataBase64).split(',').pop()!
+      : String(dataBase64);
+    const fileBuffer = Buffer.from(base64Payload, 'base64');
+
+    const maxBytes = 15 * 1024 * 1024;
+    if (!fileBuffer.length || fileBuffer.length > maxBytes) {
+      return res.status(400).json({ error: 'File must be between 1 byte and 15MB' });
+    }
+
+    const safeName = String(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `content-inputs/${businessId}/${Date.now()}-${safeName}`;
+    const bucketKey = String(type) === 'video' ? 'VIDEOS' : 'AUDIO';
+
+    const upload = await storageService.uploadFile(
+      bucketKey as any,
+      storagePath,
+      fileBuffer,
+      {
+        contentType: String(mimeType),
+        upsert: false,
+        metadata: {
+          source: 'local_upload',
+          originalFileName: safeName,
+        },
+      }
+    );
+
+    const contentInput = await createContentInput({
+      businessId,
+      type,
+      title: title || safeName,
+      url: upload.publicUrl || undefined,
+      storagePath: upload.path,
+      metadata: {
+        ...(metadata || {}),
+        source: 'local_upload',
+        fileName: safeName,
+        mimeType,
+        sizeBytes: fileBuffer.length,
+      },
+    });
+
+    await prisma.analytics.create({
+      data: {
+        businessId,
+        eventType: 'content_input_uploaded',
+        eventData: { contentId: contentInput.id, type, sizeBytes: fileBuffer.length },
+      }
+    });
+
+    res.status(201).json({
+      message: 'File uploaded and content input created successfully',
+      contentInput,
+    });
+  } catch (err) {
+    logger.error('Upload content input error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to upload content input' });
+  }
+});
+
 // POST /businesses/:businessId/content-inputs - Create new content input
 app.post('/businesses/:businessId/content-inputs', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -4322,49 +5296,43 @@ app.post('/businesses/:businessId/content-inputs/:contentId/repurpose', authenti
     if (!contentInput) return res.status(404).json({ error: 'Content input not found' });
     if (contentInput.businessId !== businessId) return res.status(403).json({ error: 'Unauthorized' });
 
-    // Generate AI repurposed content for each platform
-    const repurposedContents = [];
-    for (const platform of platforms) {
-      try {
-        // Use Claude/GPT AI to generate intelligent platform-specific content
-        const platformContent = await repurposeContentWithAI(
-          contentInput.content || contentInput.url || '',
-          platform,
-          business.name,
-          contentInput.metadata as any
-        );
+    const normalizedPlatforms = [...new Set(platforms.map((p: any) => String(p).toLowerCase().trim()))]
+      .filter((p) => ['instagram', 'tiktok', 'youtube', 'twitter', 'linkedin', 'facebook'].includes(p));
 
-        const repurposedInput: any = {
-          businessId,
-          contentInputId: contentId,
-          platform: platform as any,
-          content: platformContent.content,
-          status: 'draft',
-        };
-        
-        if (platformContent.caption) repurposedInput.caption = platformContent.caption;
-        if (platformContent.hashtags?.length) repurposedInput.hashtags = platformContent.hashtags;
-
-        const repurposed = await createRepurposedContent(repurposedInput);
-
-        repurposedContents.push(repurposed);
-      } catch (platformErr) {
-        logger.warn(`Failed to generate content for platform ${platform}`, { error: String(platformErr) });
-      }
+    if (normalizedPlatforms.length === 0) {
+      return res.status(400).json({ error: 'No valid platforms provided' });
     }
+
+    await updateContentInput(contentId, { status: 'processing' as any });
+
+    const queuedJob = await enqueueRepurposing({
+      contentId,
+      contentInputId: contentId,
+      businessId,
+      platforms: normalizedPlatforms as any,
+      originContent: contentInput.content || contentInput.url || '',
+      businessName: business.name,
+      businessContext: typeof contentInput.metadata === 'string'
+        ? contentInput.metadata
+        : JSON.stringify(contentInput.metadata || {}),
+      style: 'educational',
+    });
 
     // Track event
     await prisma.analytics.create({
       data: {
         businessId,
-        eventType: 'content_repurposed',
-        eventData: { sourceContentId: contentId, platformCount: repurposedContents.length },
+        eventType: 'content_repurpose_queued',
+        eventData: { sourceContentId: contentId, platformCount: normalizedPlatforms.length, jobId: queuedJob.id },
       }
     });
 
-    res.status(201).json({
-      message: `${repurposedContents.length} repurposed content items created`,
-      repurposedContents,
+    res.status(202).json({
+      message: 'Repurposing queued',
+      jobId: queuedJob.id,
+      status: 'processing',
+      contentInputId: contentId,
+      platforms: normalizedPlatforms,
     });
   } catch (err) {
     logger.error('Generate repurposed content error', { error: String(err) });
@@ -4421,7 +5389,7 @@ app.patch('/businesses/:businessId/repurposed-content/:repurposedId', authentica
   try {
     const businessId = paramToString(req.params.businessId);
     const repurposedId = paramToString(req.params.repurposedId);
-    const { content, caption, hashtags, status } = req.body;
+    const { content, caption, hashtags, status, performance, score, scoreBreakdown, trendHooks, metadata, assetUrl, assetPath } = req.body;
 
     if (!businessId || !repurposedId) return res.status(400).json({ error: 'Business id and repurposed id are required' });
 
@@ -4438,6 +5406,13 @@ app.patch('/businesses/:businessId/repurposed-content/:repurposedId', authentica
       caption,
       hashtags,
       status: status as any,
+      performance,
+      score,
+      scoreBreakdown,
+      trendHooks,
+      metadata,
+      assetUrl,
+      assetPath,
     });
 
     res.json({
@@ -4707,7 +5682,8 @@ app.post('/businesses/:businessId/publish', authenticateToken, async (req: AuthR
     // Generate unique slug from business name
     const slug = business.name.toLowerCase().replace(/\s+/g, '-').substring(0, 50);
     const uniqueSlug = `${slug}-${Date.now().toString(36)}`;
-    const publishedUrl = `https://${uniqueSlug}.salesape.ai/web`;
+    const frontendBase = (process.env.FRONTEND_URL || 'http://localhost:3002').replace(/\/+$/, '');
+    const publishedUrl = `${frontendBase}/live/${businessId}`;
 
     // Get current version count to generate next version number
     const currentVersions = await getBusinessVersions(businessId);
@@ -4746,6 +5722,20 @@ app.post('/businesses/:businessId/publish', authenticateToken, async (req: AuthR
     });
 
     console.log(`[Website Published] Business: ${business.name}, Version: ${version.versionNumber}, URL: ${publishedUrl}`);
+
+    // Fire-and-forget immediate audit attempt so dashboard ranking updates sooner.
+    void runAutoPageSpeedAuditForBusiness(
+      {
+        id: updatedBusiness.id,
+        userId: updatedBusiness.userId,
+        name: updatedBusiness.name,
+        slug: updatedBusiness.slug,
+        publishedUrl: updatedBusiness.publishedUrl,
+        isPublished: updatedBusiness.isPublished,
+      },
+      Number(process.env.AUTO_PAGESPEED_AUDIT_MIN_INTERVAL_MINUTES || 60),
+    );
+
     res.json({
       message: 'Website published successfully',
       business: updatedBusiness,
@@ -5599,13 +6589,79 @@ app.get('/dashboard/stats', authenticateToken, async (req: AuthRequest, res: Res
   }
 });
 
+// --- Per-website SEO rankings for Dashboard ---
+app.get('/dashboard/seo-rankings', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const businesses = await prisma.business.findMany({
+      where: { userId },
+      select: { id: true, name: true, isPublished: true, updatedAt: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const rankings = await Promise.all(
+      businesses.map(async (business) => {
+        const audits = await prisma.seoAudit.findMany({
+          where: {
+            userId,
+            businessId: business.id,
+          },
+          select: {
+            seo: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+        });
+
+        const latestSeoScore = audits[0]?.seo ?? null;
+        const avgSeoScore =
+          audits.length > 0
+            ? Math.round(audits.reduce((sum, a) => sum + a.seo, 0) / audits.length)
+            : null;
+
+        return {
+          businessId: business.id,
+          businessName: business.name,
+          isPublished: business.isPublished,
+          latestSeoScore,
+          avgSeoScore,
+          auditsCount: audits.length,
+          lastAuditAt: audits[0]?.createdAt ?? null,
+          score: latestSeoScore ?? avgSeoScore ?? 0,
+        };
+      }),
+    );
+
+    rankings.sort((a, b) => b.score - a.score);
+
+    res.json({
+      rankings: rankings.map((item, index) => ({
+        ...item,
+        rank: index + 1,
+      })),
+    });
+  } catch (err) {
+    console.error('SEO rankings fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch SEO rankings' });
+  }
+});
+
 // --- Content Studio Endpoints ---
 
 // POST /businesses/:businessId/content-projects - Create a content project
 app.post('/businesses/:businessId/content-projects', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     const businessId = paramToString(req.params.businessId);
-    const { inputType, inputUrl, inputText, reelsRequested = 3, style = 'educational', autoPublish = false } = req.body;
+    const {
+      inputType,
+      inputUrl,
+      inputText,
+      reelsRequested = 3,
+      style = 'educational',
+      autoPublish = false,
+      growthMode,
+    } = req.body;
 
     if (!businessId || !inputType) {
       return res.status(400).json({ error: 'Business ID and input type are required' });
@@ -5631,17 +6687,30 @@ app.post('/businesses/:businessId/content-projects', authenticateToken, async (r
       },
     });
 
-    // Enqueue content generation job
-    await enqueueContentGeneration({
-      projectId: project.id,
-      businessId,
-      inputType: inputType as any,
-      inputUrl,
-      inputText,
-      reelsRequested: Math.min(reelsRequested, 5),
-      style: style as any,
-      autoPublish,
-    });
+    // Enqueue content generation job (non-fatal in dev)
+    let enqueueWarning: string | null = null;
+    try {
+      await enqueueContentGeneration({
+        projectId: project.id,
+        businessId,
+        inputType: inputType as any,
+        inputUrl,
+        inputText,
+        reelsRequested: Math.min(reelsRequested, 5),
+        style: style as any,
+        autoPublish,
+        growthMode: ['CONSERVATIVE', 'BALANCED', 'AGGRESSIVE'].includes(String(growthMode))
+          ? (String(growthMode) as any)
+          : 'BALANCED',
+      });
+    } catch (err) {
+      console.warn('Content generation enqueue failed:', err);
+      if (process.env.NODE_ENV !== 'production') {
+        enqueueWarning = 'Generation enqueued failed; project saved for later processing.';
+      } else {
+        throw err;
+      }
+    }
 
     res.status(201).json({
       project: {
@@ -5650,10 +6719,20 @@ app.post('/businesses/:businessId/content-projects', authenticateToken, async (r
         reelsRequested: project.reelsRequested,
         createdAt: project.createdAt,
       },
+      ...(enqueueWarning ? { warning: enqueueWarning } : {}),
     });
   } catch (err) {
     console.error('Content project creation error:', err);
-    res.status(500).json({ error: 'Failed to create content project' });
+    res.status(500).json({
+      error: 'Failed to create content project',
+      ...(process.env.NODE_ENV === 'development' && {
+        details: {
+          message: (err as any)?.message,
+          code: (err as any)?.code,
+          type: (err as any)?.name,
+        },
+      }),
+    });
   }
 });
 
@@ -5741,6 +6820,35 @@ app.get('/businesses/:businessId/content-projects/:projectId', authenticateToken
   } catch (err) {
     console.error('Content project fetch error:', err);
     res.status(500).json({ error: 'Failed to fetch content project' });
+  }
+});
+
+// DELETE /businesses/:businessId/content-projects/:projectId - Delete a content project
+app.delete('/businesses/:businessId/content-projects/:projectId', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const businessId = paramToString(req.params.businessId);
+    const projectId = paramToString(req.params.projectId);
+
+    if (!businessId || !projectId) {
+      return res.status(400).json({ error: 'Business ID and project ID are required' });
+    }
+
+    const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business || business.userId !== req.userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const project = await prisma.contentProject.findUnique({ where: { id: projectId } });
+    if (!project || project.businessId !== businessId) {
+      return res.status(404).json({ error: 'Content project not found' });
+    }
+
+    await prisma.contentProject.delete({ where: { id: projectId } });
+
+    res.json({ message: 'Content project deleted successfully' });
+  } catch (err) {
+    console.error('Content project delete error:', err);
+    res.status(500).json({ error: 'Failed to delete content project' });
   }
 });
 
@@ -6447,6 +7555,24 @@ app.post('/businesses/:businessId/payments', authenticateToken, async (req: Auth
 
 // --- PHASE 5: Website Creation Endpoints ---
 
+app.get('/websites/questions', authenticateToken, async (_req: AuthRequest, res: Response) => {
+  try {
+    const questions = [
+      { id: 'business_name', label: 'What is your business name?' },
+      { id: 'business_type', label: 'What type of business do you run?' },
+      { id: 'services', label: 'What services or products do you offer?' },
+      { id: 'audience', label: 'Who is your ideal customer?' },
+      { id: 'location', label: 'Where are you located / who do you serve?' },
+      { id: 'brand_voice', label: 'What brand tone should we use?' },
+      { id: 'cta', label: 'What is your primary call to action?' },
+    ];
+    res.json({ questions });
+  } catch (error) {
+    logger.error('Get website questions error', { error: String(error) });
+    res.status(500).json({ error: 'Failed to load website questions' });
+  }
+});
+
 // Get questionnaire questions for website builder
 app.post('/websites/questionnaire', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -6591,7 +7717,7 @@ app.post('/websites/chat', authenticateToken, async (req: AuthRequest, res: Resp
             sessionId,
             userMessage: message,
             aiResponse,
-            timestamp: new Date(),
+            timestamp: new Date().toISOString(),
           },
         },
       }).catch(() => {
@@ -6733,14 +7859,36 @@ const server = app.listen(PORT, () => {
   console.log(`[Server] running on http://localhost:${PORT}`);
   console.log('[Server] ready for connections');
   console.log('[Database] Prisma client connected');
+  startAutoPageSpeedAuditScheduler();
 });
 
 server.on('error', (err: any) => {
-  console.error('[Server Error]', err && err.message ? err.message : String(err));
+  const message = err && err.message ? err.message : String(err);
+  console.error('[Server Error]', message);
+  if (err?.code === 'EADDRINUSE') {
+    console.error(`[Server Error] Port ${PORT} is already in use. Stop the existing backend process before starting a new one.`);
+  }
 });
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
+  if (autoAuditTimer) {
+    clearInterval(autoAuditTimer);
+    autoAuditTimer = null;
+  }
+  server.close(() => {
+    console.log('Server closed');
+    prisma.$disconnect();
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  if (autoAuditTimer) {
+    clearInterval(autoAuditTimer);
+    autoAuditTimer = null;
+  }
   server.close(() => {
     console.log('Server closed');
     prisma.$disconnect();
@@ -6762,7 +7910,7 @@ app.get('/businesses/:businessId/dashboard', authenticateToken, async (req: Auth
     const { businessId } = req.params;
     
     // Check permission
-    await requirePermission(businessId, req.user?.id || '', 'viewDashboard');
+    await requirePermission(businessId, req.userId || '', 'viewDashboard');
 
     const metrics = await getDashboardMetrics(businessId);
 
@@ -6784,7 +7932,7 @@ app.get('/businesses/:businessId/analytics/by-platform/:platform', authenticateT
   try {
     const { businessId, platform } = req.params;
     
-    await requirePermission(businessId, req.user?.id || '', 'viewAnalytics');
+    await requirePermission(businessId, req.userId || '', 'viewAnalytics');
 
     const metrics = await getPlatformMetrics(businessId, platform);
 
@@ -6808,7 +7956,7 @@ app.get('/businesses/:businessId/analytics/trends', authenticateToken, async (re
     const daysParam = req.query.days as string;
     const days = daysParam ? parseInt(daysParam) : 30;
 
-    await requirePermission(businessId, req.user?.id || '', 'viewAnalytics');
+    await requirePermission(businessId, req.userId || '', 'viewAnalytics');
 
     const trends = await getTrendData(businessId, days);
 
@@ -6831,7 +7979,7 @@ app.post('/businesses/:businessId/analytics/compare', authenticateToken, async (
     const { businessId } = req.params;
     const { startDate1, endDate1, startDate2, endDate2 } = req.body;
 
-    await requirePermission(businessId, req.user?.id || '', 'viewAnalytics');
+    await requirePermission(businessId, req.userId || '', 'viewAnalytics');
 
     if (!startDate1 || !endDate1 || !startDate2 || !endDate2) {
       return res.status(400).json({ error: 'Missing date range parameters' });
@@ -6863,7 +8011,7 @@ app.get('/businesses/:businessId/analytics/revenue', authenticateToken, async (r
   try {
     const { businessId } = req.params;
     
-    await requirePermission(businessId, req.user?.id || '', 'viewAnalytics');
+    await requirePermission(businessId, req.userId || '', 'viewAnalytics');
 
     const revenue = await getRevenueAttribution(businessId);
 
@@ -6888,7 +8036,7 @@ app.get('/businesses/:businessId/schedule', authenticateToken, async (req: AuthR
     const { businessId } = req.params;
     const { status, platform, from, to } = req.query;
 
-    await requirePermission(businessId, req.user?.id || '', 'viewSchedule');
+    await requirePermission(businessId, req.userId || '', 'viewSchedule');
 
     const filters = {
       status: status as string | undefined,
@@ -6918,7 +8066,7 @@ app.post('/businesses/:businessId/schedule', authenticateToken, async (req: Auth
     const { businessId } = req.params;
     const { repurposedContentId, scheduledFor } = req.body;
 
-    await requirePermission(businessId, req.user?.id || '', 'scheduleContent');
+    await requirePermission(businessId, req.userId || '', 'scheduleContent');
 
     if (!repurposedContentId || !scheduledFor) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -6947,7 +8095,7 @@ app.get('/businesses/:businessId/schedule/calendar', authenticateToken, async (r
     const monthParam = req.query.month as string;
     const month = monthParam ? new Date(monthParam) : new Date();
 
-    await requirePermission(businessId, req.user?.id || '', 'viewSchedule');
+    await requirePermission(businessId, req.userId || '', 'viewSchedule');
 
     const calendar = await getScheduleCalendar(businessId, month);
 
@@ -6970,7 +8118,7 @@ app.put('/businesses/:businessId/schedule/:scheduledPostId', authenticateToken, 
     const { businessId, scheduledPostId } = req.params;
     const { scheduledFor, status } = req.body;
 
-    await requirePermission(businessId, req.user?.id || '', 'scheduleContent');
+    await requirePermission(businessId, req.userId || '', 'scheduleContent');
 
     const updated = await updateSchedule(businessId, scheduledPostId, { scheduledFor, status } as any);
 
@@ -6993,7 +8141,7 @@ app.delete('/businesses/:businessId/schedule/:scheduledPostId', authenticateToke
   try {
     const { businessId, scheduledPostId } = req.params;
 
-    await requirePermission(businessId, req.user?.id || '', 'scheduleContent');
+    await requirePermission(businessId, req.userId || '', 'scheduleContent');
 
     const result = await cancelSchedule(businessId, scheduledPostId);
 
@@ -7016,8 +8164,8 @@ app.post('/businesses/:businessId/schedule/bulk', authenticateToken, async (req:
     const { businessId } = req.params;
     const { schedules } = req.body;
 
-    await requirePermission(businessId, req.user?.id || '', 'scheduleContent');
-    await requirePermission(businessId, req.user?.id || '', 'bulkActions');
+    await requirePermission(businessId, req.userId || '', 'scheduleContent');
+    await requirePermission(businessId, req.userId || '', 'bulkActions');
 
     if (!Array.isArray(schedules)) {
       return res.status(400).json({ error: 'schedules must be an array' });
@@ -7045,7 +8193,7 @@ app.get('/businesses/:businessId/schedule/upcoming', authenticateToken, async (r
     const daysParam = req.query.days as string;
     const days = daysParam ? parseInt(daysParam) : 7;
 
-    await requirePermission(businessId, req.user?.id || '', 'viewSchedule');
+    await requirePermission(businessId, req.userId || '', 'viewSchedule');
 
     const upcoming = await getUpcomingSchedules(businessId, days);
 
@@ -7067,7 +8215,7 @@ app.get('/businesses/:businessId/schedule/stats', authenticateToken, async (req:
   try {
     const { businessId } = req.params;
 
-    await requirePermission(businessId, req.user?.id || '', 'viewSchedule');
+    await requirePermission(businessId, req.userId || '', 'viewSchedule');
 
     const stats = await getSchedulingStats(businessId);
 
@@ -7093,7 +8241,7 @@ app.get('/businesses/:businessId/approval-queue', authenticateToken, async (req:
     const limitParam = req.query.limit as string;
     const limit = limitParam ? parseInt(limitParam) : 20;
 
-    await requirePermission(businessId, req.user?.id || '', 'viewApprovalQueue');
+    await requirePermission(businessId, req.userId || '', 'viewApprovalQueue');
 
     const queue = await getApprovalQueue(businessId, limit);
 
@@ -7116,9 +8264,9 @@ app.post('/businesses/:businessId/repurposed-content/:repurposedContentId/approv
     const { businessId, repurposedContentId } = req.params;
     const { comment } = req.body;
 
-    await requirePermission(businessId, req.user?.id || '', 'approveContent');
+    await requirePermission(businessId, req.userId || '', 'approveContent');
 
-    const result = await approveContent(businessId, repurposedContentId, req.user?.id || '', comment);
+    const result = await approveContent(businessId, repurposedContentId, req.userId || '', comment);
 
     res.json({
       success: true,
@@ -7140,13 +8288,13 @@ app.post('/businesses/:businessId/repurposed-content/:repurposedContentId/reject
     const { businessId, repurposedContentId } = req.params;
     const { reason } = req.body;
 
-    await requirePermission(businessId, req.user?.id || '', 'rejectContent');
+    await requirePermission(businessId, req.userId || '', 'rejectContent');
 
     if (!reason) {
       return res.status(400).json({ error: 'Rejection reason is required' });
     }
 
-    const result = await rejectContent(businessId, repurposedContentId, req.user?.id || '', reason);
+    const result = await rejectContent(businessId, repurposedContentId, req.userId || '', reason);
 
     res.json({
       success: true,
@@ -7167,7 +8315,7 @@ app.get('/businesses/:businessId/repurposed-content/:repurposedContentId/approva
   try {
     const { businessId, repurposedContentId } = req.params;
 
-    await requirePermission(businessId, req.user?.id || '', 'viewApprovalQueue');
+    await requirePermission(businessId, req.userId || '', 'viewApprovalQueue');
 
     const history = await getApprovalHistory(businessId, repurposedContentId);
 
@@ -7189,7 +8337,7 @@ app.get('/businesses/:businessId/approval-stats', authenticateToken, async (req:
   try {
     const { businessId } = req.params;
 
-    await requirePermission(businessId, req.user?.id || '', 'viewAnalytics');
+    await requirePermission(businessId, req.userId || '', 'viewAnalytics');
 
     const stats = await getApprovalStats(businessId);
 
@@ -7212,14 +8360,14 @@ app.post('/businesses/:businessId/approval/bulk', authenticateToken, async (req:
     const { businessId } = req.params;
     const { contentIds, comment } = req.body;
 
-    await requirePermission(businessId, req.user?.id || '', 'approveContent');
-    await requirePermission(businessId, req.user?.id || '', 'bulkActions');
+    await requirePermission(businessId, req.userId || '', 'approveContent');
+    await requirePermission(businessId, req.userId || '', 'bulkActions');
 
     if (!Array.isArray(contentIds)) {
       return res.status(400).json({ error: 'contentIds must be an array' });
     }
 
-    const results = await bulkApprove(businessId, contentIds, req.user?.id || '', comment);
+    const results = await bulkApprove(businessId, contentIds, req.userId || '', comment);
 
     res.json({
       success: true,
@@ -7241,7 +8389,7 @@ app.get('/businesses/:businessId/team/members', authenticateToken, async (req: A
   try {
     const { businessId } = req.params;
 
-    await requirePermission(businessId, req.user?.id || '', 'manageTeam');
+    await requirePermission(businessId, req.userId || '', 'manageTeam');
 
     const members = await getTeamMembers(businessId);
 
@@ -7264,7 +8412,7 @@ app.put('/businesses/:businessId/team/members/:memberId/role', authenticateToken
     const { businessId, memberId } = req.params;
     const { role } = req.body;
 
-    await requirePermission(businessId, req.user?.id || '', 'manageTeam');
+    await requirePermission(businessId, req.userId || '', 'manageTeam');
 
     if (!role || !['admin', 'content-manager', 'approver', 'viewer'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
@@ -7297,7 +8445,7 @@ app.delete('/businesses/:businessId/team/members/:memberId', authenticateToken, 
   try {
     const { businessId, memberId } = req.params;
 
-    await requirePermission(businessId, req.user?.id || '', 'manageTeam');
+    await requirePermission(businessId, req.userId || '', 'manageTeam');
 
     const result = await removeMember(businessId, memberId);
 
@@ -7319,7 +8467,7 @@ app.get('/businesses/:businessId/team/permissions', authenticateToken, async (re
   try {
     const { businessId } = req.params;
 
-    const permissions = await getUserPermissions(businessId, req.user?.id || '');
+    const permissions = await getUserPermissions(businessId, req.userId || '');
 
     res.json({
       success: true,
@@ -7368,5 +8516,3 @@ app.get('/team/permissions-matrix', authenticateToken, async (req: Request, res:
 });
 
 export default app;
-
-

@@ -20,6 +20,8 @@ dotenv.config();
 import { Queue } from 'bullmq';
 import { getRedisClient, createRedisClient } from '../utils/redis-client.js';
 import { logRedisConfig } from '../utils/redis-config.js';
+import { getQueueProvider } from './provider.js';
+import { enqueueRepurposingPgBoss, getPgBossJobCounts } from './pgboss.js';
 
 export * from './website.queue.js';
 
@@ -43,6 +45,7 @@ export interface ContentGenerationJob {
   reelsRequested?: number;
   style?: 'educational' | 'authority' | 'storytelling' | 'entertaining' | 'bold' | 'calm';
   autoPublish?: boolean;
+  growthMode?: 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE';
 }
 
 export interface SocialPostingJob {
@@ -86,10 +89,15 @@ export interface ContentIngestionJob {
 export interface RepurposingJob {
   contentId: string;
   businessId: string;
-  originContent: string;
-  targetFormats: Array<'instagram-reel' | 'tiktok' | 'youtube-short' | 'twitter-thread' | 'linkedin' | 'blog-excerpt'>;
+  originContent?: string;
+  targetFormats?: Array<'instagram-reel' | 'tiktok' | 'youtube-short' | 'twitter-thread' | 'linkedin' | 'blog-excerpt'>;
   style?: 'educational' | 'authority' | 'storytelling' | 'entertaining' | 'bold' | 'calm';
   tone?: string;
+  // Async Content Studio mode
+  contentInputId?: string;
+  platforms?: Array<'instagram' | 'tiktok' | 'youtube' | 'twitter' | 'linkedin' | 'facebook'>;
+  businessName?: string;
+  businessContext?: string;
 }
 
 export interface DistributionJob {
@@ -102,42 +110,69 @@ export interface DistributionJob {
   scheduleTime?: Date;
 }
 
-// Ensure singleton Redis client is available for all queues
-logRedisConfig();
-createRedisClient();
+const queueProvider = getQueueProvider();
+const isBullMQ = queueProvider === 'bullmq';
+export const QUEUE_PROVIDER = queueProvider;
+
+// Ensure singleton Redis client is available for BullMQ queues
+if (isBullMQ) {
+  logRedisConfig();
+  createRedisClient();
+}
 
 // Initialize queues using shared Redis client singleton
-export const leadAutomationQueue = new Queue<LeadAutomationJob, any, 'lead-automation'>('lead-automation', {
-  connection: getRedisClient(),
-});
+export const leadAutomationQueue = isBullMQ
+  ? new Queue<LeadAutomationJob, any, 'lead-automation'>('lead-automation', {
+      connection: getRedisClient(),
+    })
+  : null;
 
-export const contentGenerationQueue = new Queue<ContentGenerationJob, any, 'content-generation'>('content-generation', {
-  connection: getRedisClient(),
-});
+export const contentGenerationQueue = isBullMQ
+  ? new Queue<ContentGenerationJob, any, 'content-generation'>('content-generation', {
+      connection: getRedisClient(),
+    })
+  : null;
 
-export const socialPostingQueue = new Queue<SocialPostingJob, any, 'social-posting'>('social-posting', {
-  connection: getRedisClient(),
-});
+export const socialPostingQueue = isBullMQ
+  ? new Queue<SocialPostingJob, any, 'social-posting'>('social-posting', {
+      connection: getRedisClient(),
+    })
+  : null;
 
-export const reviewRequestQueue = new Queue<ReviewRequestJob, any, 'review-request'>('review-request', {
-  connection: getRedisClient(),
-});
+export const reviewRequestQueue = isBullMQ
+  ? new Queue<ReviewRequestJob, any, 'review-request'>('review-request', {
+      connection: getRedisClient(),
+    })
+  : null;
 
-export const analyticsPollingQueue = new Queue<AnalyticsPollingJob, any, 'analytics-polling'>('analytics-polling', {
-  connection: getRedisClient(),
-});
+export const analyticsPollingQueue = isBullMQ
+  ? new Queue<AnalyticsPollingJob, any, 'analytics-polling'>('analytics-polling', {
+      connection: getRedisClient(),
+    })
+  : null;
 
-export const contentIngestionQueue = new Queue<ContentIngestionJob, any, 'content-ingestion'>('content-ingestion', {
-  connection: getRedisClient(),
-});
+export const contentIngestionQueue = isBullMQ
+  ? new Queue<ContentIngestionJob, any, 'content-ingestion'>('content-ingestion', {
+      connection: getRedisClient(),
+    })
+  : null;
 
-export const repurposingQueue = new Queue<RepurposingJob, any, 'repurposing'>('repurposing', {
-  connection: getRedisClient(),
-});
+export const repurposingQueue = isBullMQ
+  ? new Queue<RepurposingJob, any, 'repurposing'>('repurposing', {
+      connection: getRedisClient(),
+    })
+  : null;
 
-export const distributionQueue = new Queue<DistributionJob, any, 'distribution'>('distribution', {
-  connection: getRedisClient(),
-});
+export const distributionQueue = isBullMQ
+  ? new Queue<DistributionJob, any, 'distribution'>('distribution', {
+      connection: getRedisClient(),
+    })
+  : null;
+
+function requireQueue<T>(queue: T | null, name: string): T {
+  if (!queue) throw new Error(`${name} unavailable with current queue provider: ${queueProvider}`);
+  return queue;
+}
 
 /**
  * LEAD AUTOMATION
@@ -146,7 +181,7 @@ export const distributionQueue = new Queue<DistributionJob, any, 'distribution'>
  * Actions: Score lead, send welcome email, add to sequence
  */
 export async function enqueueLeadAutomation(data: LeadAutomationJob, options?: any) {
-  return await leadAutomationQueue.add('lead-automation', data, {
+  return await requireQueue(leadAutomationQueue, 'leadAutomationQueue').add('lead-automation', data, {
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },
     removeOnComplete: { age: 86400 },
@@ -162,7 +197,7 @@ export async function enqueueLeadAutomation(data: LeadAutomationJob, options?: a
  * Actions: Fetch content, generate reels, save variants
  */
 export async function enqueueContentGeneration(data: ContentGenerationJob, options?: any) {
-  return await contentGenerationQueue.add('content-generation', data, {
+  return await requireQueue(contentGenerationQueue, 'contentGenerationQueue').add('content-generation', data, {
     attempts: 2,
     backoff: { type: 'exponential', delay: 3000 },
     removeOnComplete: { age: 604800 },
@@ -190,7 +225,7 @@ export async function enqueueSocialPosting(data: SocialPostingJob, options?: any
     opts.delay = new Date(data.scheduleTime).getTime() - Date.now();
   }
 
-  return await socialPostingQueue.add('social-posting', data, { ...opts, ...options });
+  return await requireQueue(socialPostingQueue, 'socialPostingQueue').add('social-posting', data, { ...opts, ...options });
 }
 
 /**
@@ -200,7 +235,7 @@ export async function enqueueSocialPosting(data: SocialPostingJob, options?: any
  * Actions: Send review request email with platform links
  */
 export async function enqueueReviewRequest(data: ReviewRequestJob, options?: any) {
-  return await reviewRequestQueue.add('review-request', data, {
+  return await requireQueue(reviewRequestQueue, 'reviewRequestQueue').add('review-request', data, {
     attempts: 2,
     backoff: { type: 'exponential', delay: 3000 },
     delay: 60 * 60 * 1000, // 1 hour delay
@@ -220,7 +255,7 @@ export async function enqueueAnalyticsPolling(
   data: AnalyticsPollingJob,
   options?: any
 ) {
-  return await analyticsPollingQueue.add('analytics-polling', data, {
+  return await requireQueue(analyticsPollingQueue, 'analyticsPollingQueue').add('analytics-polling', data, {
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
     removeOnComplete: { age: 604800 },
@@ -236,7 +271,7 @@ export async function enqueueAnalyticsPolling(
  * Actions: Fetch content from URL, extract text, save metadata
  */
 export async function enqueueContentIngestion(data: ContentIngestionJob, options?: any) {
-  return await contentIngestionQueue.add('content-ingestion', data, {
+  return await requireQueue(contentIngestionQueue, 'contentIngestionQueue').add('content-ingestion', data, {
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },
     removeOnComplete: { age: 604800 },
@@ -252,7 +287,14 @@ export async function enqueueContentIngestion(data: ContentIngestionJob, options
  * Actions: Transform content into multiple formats, generate variants
  */
 export async function enqueueRepurposing(data: RepurposingJob, options?: any) {
-  return await repurposingQueue.add('repurposing', data, {
+  if (queueProvider === 'pgboss') {
+    return enqueueRepurposingPgBoss(data, {
+      attempts: options?.attempts ?? 2,
+      delay: options?.delay,
+    });
+  }
+
+  return await requireQueue(repurposingQueue, 'repurposingQueue').add('repurposing', data, {
     attempts: 2,
     backoff: { type: 'exponential', delay: 3000 },
     removeOnComplete: { age: 604800 },
@@ -280,22 +322,36 @@ export async function enqueueDistribution(data: DistributionJob, options?: any) 
     opts.delay = new Date(data.scheduleTime).getTime() - Date.now();
   }
 
-  return await distributionQueue.add('distribution', data, { ...opts, ...options });
+  return await requireQueue(distributionQueue, 'distributionQueue').add('distribution', data, { ...opts, ...options });
 }
 
 /**
  * Queue Monitoring
  */
 export async function getQueueStats() {
+  if (queueProvider === 'pgboss') {
+    const repurposeStats = await getPgBossJobCounts();
+    return {
+      lead_automation: {},
+      content_generation: {},
+      social_posting: {},
+      review_request: {},
+      analytics_polling: {},
+      content_ingestion: {},
+      repurposing: repurposeStats,
+      distribution: {},
+    };
+  }
+
   const stats = await Promise.all([
-    leadAutomationQueue.getJobCounts(),
-    contentGenerationQueue.getJobCounts(),
-    socialPostingQueue.getJobCounts(),
-    reviewRequestQueue.getJobCounts(),
-    analyticsPollingQueue.getJobCounts(),
-    contentIngestionQueue.getJobCounts(),
-    repurposingQueue.getJobCounts(),
-    distributionQueue.getJobCounts(),
+    requireQueue(leadAutomationQueue, 'leadAutomationQueue').getJobCounts(),
+    requireQueue(contentGenerationQueue, 'contentGenerationQueue').getJobCounts(),
+    requireQueue(socialPostingQueue, 'socialPostingQueue').getJobCounts(),
+    requireQueue(reviewRequestQueue, 'reviewRequestQueue').getJobCounts(),
+    requireQueue(analyticsPollingQueue, 'analyticsPollingQueue').getJobCounts(),
+    requireQueue(contentIngestionQueue, 'contentIngestionQueue').getJobCounts(),
+    requireQueue(repurposingQueue, 'repurposingQueue').getJobCounts(),
+    requireQueue(distributionQueue, 'distributionQueue').getJobCounts(),
   ]);
 
   return {

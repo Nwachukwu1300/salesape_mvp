@@ -7,6 +7,7 @@ import React, { useState, useEffect } from "react";
 import { Card } from "./Card";
 import { Button } from "./Button";
 import { Loading } from "./Loading";
+import { getAccessToken } from "../lib/supabase";
 
 interface ApprovalContent {
   id: string;
@@ -20,6 +21,7 @@ interface ApprovalContent {
 export const ApprovalQueue: React.FC<{ businessId: string }> = ({
   businessId,
 }) => {
+  const [resolvedBusinessId, setResolvedBusinessId] = useState<string>(businessId);
   const [queue, setQueue] = useState<ApprovalContent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,17 +29,45 @@ export const ApprovalQueue: React.FC<{ businessId: string }> = ({
   const [comment, setComment] = useState("");
 
   useEffect(() => {
-    fetchQueue();
+    const resolveBusinessId = async () => {
+      if (businessId) {
+        setResolvedBusinessId(businessId);
+        return;
+      }
+
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
+      const response = await fetch(`/businesses`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error("Failed to resolve business");
+      const businesses = await response.json();
+      const id = Array.isArray(businesses) ? businesses[0]?.id : undefined;
+      if (!id) throw new Error("No business found for this account");
+      setResolvedBusinessId(id);
+    };
+
+    resolveBusinessId().catch((err) => {
+      setError(err instanceof Error ? err.message : "Failed to resolve business");
+      setLoading(false);
+    });
   }, [businessId]);
+
+  useEffect(() => {
+    if (!resolvedBusinessId) return;
+    fetchQueue();
+  }, [resolvedBusinessId]);
 
   const fetchQueue = async () => {
     try {
       setLoading(true);
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
       const response = await fetch(
-        `/api/businesses/${businessId}/approval-queue`,
+        `/businesses/${resolvedBusinessId}/approval-queue`,
         {
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${token}`,
           },
         },
       );
@@ -55,12 +85,14 @@ export const ApprovalQueue: React.FC<{ businessId: string }> = ({
 
   const handleApprove = async (id: string) => {
     try {
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
       const response = await fetch(
-        `/api/businesses/${businessId}/repurposed-content/${id}/approve`,
+        `/businesses/${resolvedBusinessId}/repurposed-content/${id}/approve`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ comment }),
@@ -79,12 +111,14 @@ export const ApprovalQueue: React.FC<{ businessId: string }> = ({
 
   const handleReject = async (id: string, reason: string) => {
     try {
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
       const response = await fetch(
-        `/api/businesses/${businessId}/repurposed-content/${id}/reject`,
+        `/businesses/${resolvedBusinessId}/repurposed-content/${id}/reject`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ reason }),
@@ -136,7 +170,7 @@ export const ApprovalQueue: React.FC<{ businessId: string }> = ({
         </div>
       )}
 
-      <ApprovalStats businessId={businessId} />
+      <ApprovalStats businessId={resolvedBusinessId} />
     </div>
   );
 };
@@ -234,11 +268,13 @@ const ApprovalStats: React.FC<{ businessId: string }> = ({ businessId }) => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
+        const token = getAccessToken();
+        if (!token || !businessId) return;
         const response = await fetch(
-          `/api/businesses/${businessId}/approval-stats`,
+          `/businesses/${businessId}/approval-stats`,
           {
             headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
+              Authorization: `Bearer ${token}`,
             },
           },
         );

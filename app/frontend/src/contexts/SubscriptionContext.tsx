@@ -7,8 +7,7 @@ import {
 } from "react";
 import { useAuth } from "./AuthContext";
 import { PlanType, PRICING_PLANS } from "../lib/stripe";
-
-const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/g, "");
+import { API_BASE } from "../lib/api";
 
 interface SubscriptionContextType {
   currentPlan: PlanType;
@@ -173,6 +172,11 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   };
 
   const planLimits = PRICING_PLANS[currentPlan].limits;
+  const isDev =
+    (typeof import.meta !== "undefined" && Boolean((import.meta as any).env?.DEV)) ||
+    (typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1"));
 
   // Calculate remaining SEO audits
   const seoAuditsRemaining = Math.max(
@@ -180,7 +184,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     planLimits.seoAudits - usage.seoAudits,
   );
 
-  const canCreateWebsite = usage.websites < planLimits.websites;
+  const canCreateWebsite = isDev ? true : usage.websites < planLimits.websites;
   const canCaptureLead = usage.leads < planLimits.leads;
   const canRunSEOAudit = usage.seoAudits < planLimits.seoAudits;
 

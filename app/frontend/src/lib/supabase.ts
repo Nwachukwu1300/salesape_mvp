@@ -4,6 +4,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
 // In-memory token storage (cleared on tab close)
 let memoryAccessToken: string | null = null;
+const ACCESS_TOKEN_KEY = "supabase.access.token";
 
 export interface AuthSession {
   access_token: string;
@@ -20,7 +21,15 @@ export interface AuthSession {
  * Returns null if not logged in
  */
 function getAccessToken(): string | null {
-  return memoryAccessToken;
+  if (memoryAccessToken) return memoryAccessToken;
+  try {
+    const stored = sessionStorage.getItem(ACCESS_TOKEN_KEY);
+    if (stored) {
+      memoryAccessToken = stored;
+      return stored;
+    }
+  } catch {}
+  return null;
 }
 
 /**
@@ -28,6 +37,13 @@ function getAccessToken(): string | null {
  */
 function setAccessToken(token: string | null) {
   memoryAccessToken = token;
+  try {
+    if (token) {
+      sessionStorage.setItem(ACCESS_TOKEN_KEY, token);
+    } else {
+      sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+    }
+  } catch {}
 }
 
 /**
@@ -67,6 +83,9 @@ function setRefreshToken(token: string | null) {
  */
 function clearTokens() {
   memoryAccessToken = null;
+  try {
+    sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+  } catch {}
   setRefreshToken(null);
 }
 
@@ -224,6 +243,9 @@ export const supabase = {
       }
       // Clear all tokens
       clearTokens();
+      try {
+        localStorage.removeItem("salesape.chatButtonPos");
+      } catch {}
 
       // Notify backend to clear refresh cookie
       await fetch(`${window.location.origin}/api/auth/clear-refresh-cookie`, {

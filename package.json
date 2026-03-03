@@ -1,4 +1,6 @@
 {
+  "name": "salesape-monorepo",
+  "version": "1.0.0",
   "devDependencies": {
     "@prisma/client": "^7.3.0",
     "@types/cheerio": "^0.22.35",

@@ -85,8 +85,24 @@ export async function getUserPermissions(
   userId: string
 ): Promise<PermissionSet> {
   try {
+    const business = await prisma.business.findUnique({
+      where: { id: businessId },
+      select: { userId: true },
+    });
+    if (business?.userId === userId) {
+      return ROLE_PERMISSIONS.admin;
+    }
+
+    const team = await prisma.team.findFirst({
+      where: { businessId },
+      select: { id: true },
+    });
+    if (!team) {
+      return ROLE_PERMISSIONS.viewer;
+    }
+
     const teamMember = await prisma.teamMember.findFirst({
-      where: { teamId: businessId, userId },
+      where: { teamId: team.id, userId },
     });
 
     if (!teamMember) {
@@ -294,7 +310,7 @@ export async function validateRoleChange(
     if (member.role === 'admin' && newRole !== 'admin') {
       const adminCount = await prisma.teamMember.count({
         where: {
-          teamId: businessId,
+          teamId: member.teamId,
           role: 'admin',
         },
       });

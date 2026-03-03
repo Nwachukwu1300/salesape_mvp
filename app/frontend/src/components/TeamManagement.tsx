@@ -7,6 +7,7 @@ import React, { useState, useEffect } from "react";
 import { Card } from "./Card";
 import { Button } from "./Button";
 import { Loading } from "./Loading";
+import { getAccessToken } from "../lib/supabase";
 
 interface TeamMember {
   id: string;
@@ -26,27 +27,56 @@ interface RoleDescription {
 export const TeamManagement: React.FC<{ businessId: string }> = ({
   businessId,
 }) => {
+  const [resolvedBusinessId, setResolvedBusinessId] = useState<string>(businessId);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [roles, setRoles] = useState<{ [key: string]: RoleDescription }>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchData();
+    const resolveBusinessId = async () => {
+      if (businessId) {
+        setResolvedBusinessId(businessId);
+        return;
+      }
+
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
+      const response = await fetch(`/businesses`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error("Failed to resolve business");
+      const businesses = await response.json();
+      const id = Array.isArray(businesses) ? businesses[0]?.id : undefined;
+      if (!id) throw new Error("No business found for this account");
+      setResolvedBusinessId(id);
+    };
+
+    resolveBusinessId().catch((err) => {
+      setError(err instanceof Error ? err.message : "Failed to resolve business");
+      setLoading(false);
+    });
   }, [businessId]);
+
+  useEffect(() => {
+    if (!resolvedBusinessId) return;
+    fetchData();
+  }, [resolvedBusinessId]);
 
   const fetchData = async () => {
     try {
       setLoading(true);
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
       const [membersRes, rolesRes] = await Promise.all([
-        fetch(`/api/businesses/${businessId}/team/members`, {
+        fetch(`/businesses/${resolvedBusinessId}/team/members`, {
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${token}`,
           },
         }),
-        fetch("/api/team/role-descriptions", {
+        fetch("/team/role-descriptions", {
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${token}`,
           },
         }),
       ]);
@@ -68,12 +98,14 @@ export const TeamManagement: React.FC<{ businessId: string }> = ({
 
   const handleRoleChange = async (memberId: string, newRole: string) => {
     try {
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
       const response = await fetch(
-        `/api/businesses/${businessId}/team/members/${memberId}/role`,
+        `/businesses/${resolvedBusinessId}/team/members/${memberId}/role`,
         {
           method: "PUT",
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ role: newRole }),
@@ -92,12 +124,14 @@ export const TeamManagement: React.FC<{ businessId: string }> = ({
     if (!confirm("Are you sure you want to remove this team member?")) return;
 
     try {
+      const token = getAccessToken();
+      if (!token) throw new Error("Missing auth token");
       const response = await fetch(
-        `/api/businesses/${businessId}/team/members/${memberId}`,
+        `/businesses/${resolvedBusinessId}/team/members/${memberId}`,
         {
           method: "DELETE",
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${token}`,
           },
         },
       );
@@ -214,9 +248,11 @@ const PermissionsMatrix: React.FC = () => {
   useEffect(() => {
     const fetchMatrix = async () => {
       try {
-        const response = await fetch("/api/team/permissions-matrix", {
+        const token = getAccessToken();
+        if (!token) return;
+        const response = await fetch("/team/permissions-matrix", {
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${token}`,
           },
         });
         const result = await response.json();
@@ -225,7 +261,6 @@ const PermissionsMatrix: React.FC = () => {
         setLoading(false);
       }
     };
-
     fetchMatrix();
   }, []);
 

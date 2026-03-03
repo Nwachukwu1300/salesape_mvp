@@ -1,5 +1,6 @@
 import React from "react";
 import { WebsiteConfig } from "../types/website-config";
+import { getReadableTextColor } from "../lib/colorContrast";
 
 interface TemplateProps {
   config: WebsiteConfig;
@@ -21,6 +22,12 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
 }) => {
   const primaryColor = config.branding.colors[0] || "#3B82F6";
   const secondaryColor = config.branding.colors[1] || "#1E40AF";
+  const buttonTextOnPrimary = getReadableTextColor(primaryColor);
+  const textOnSecondary = getReadableTextColor(secondaryColor);
+  const mutedOnSecondary =
+    textOnSecondary === "#FFFFFF"
+      ? "rgba(255,255,255,0.82)"
+      : "rgba(17,24,39,0.82)";
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -35,13 +42,13 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
 
   return (
     <div
-      className="min-h-screen font-sans"
+      className="min-h-screen overflow-x-hidden font-sans"
       style={{ fontFamily: config.branding.fontFamily || "Inter" }}
     >
       {/* Hero Section - Full Width Image */}
       <section
         id="hero"
-        className="relative min-h-[90vh] flex items-center justify-center overflow-hidden"
+        className="relative flex min-h-[78vh] items-center justify-center overflow-hidden sm:min-h-[85vh]"
       >
         <div
           className="absolute inset-0 bg-cover bg-center"
@@ -53,7 +60,7 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
             backgroundColor: `rgba(0,0,0,${config.hero.overlayOpacity || 0.4})`,
           }}
         />
-        <div className="relative z-10 text-center text-white px-4 max-w-4xl">
+        <div className="relative z-10 max-w-4xl px-4 text-center text-white">
           {config.branding.logoUrl && (
             <img
               src={config.branding.logoUrl}
@@ -62,16 +69,16 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
               loading="lazy"
             />
           )}
-          <h1 className="text-4xl md:text-6xl font-bold mb-6 leading-tight">
+          <h1 className="mb-6 text-3xl font-bold leading-tight sm:text-4xl md:text-6xl">
             {config.hero.headline}
           </h1>
-          <p className="text-xl md:text-2xl mb-8 opacity-90">
+          <p className="mb-8 text-base opacity-90 sm:text-lg md:text-2xl">
             {config.hero.subheadline}
           </p>
           <a
             href={config.hero.ctaLink || "#contact"}
             className="inline-block px-8 py-4 text-lg font-semibold rounded-xl transition-all transform hover:scale-105 hover:shadow-xl"
-            style={{ backgroundColor: primaryColor, color: "#fff" }}
+            style={{ backgroundColor: primaryColor, color: buttonTextOnPrimary }}
             onClick={(e) => {
               if (config.hero.ctaLink === "#booking" && onBookingClick) {
                 e.preventDefault();
@@ -111,7 +118,7 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
       )}
 
       {/* Services Section - Grid Layout */}
-      <section id="services" className="py-20 px-4 bg-white">
+      <section id="services" className="bg-white px-4 py-14 sm:py-20">
         <div className="max-w-6xl mx-auto">
           <h2 className="text-3xl md:text-4xl font-bold text-center mb-4">
             {config.services.title}
@@ -121,7 +128,7 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
               {config.services.subtitle}
             </p>
           )}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
             {config.services.items.map((service, idx) => (
               <div
                 key={idx}
@@ -156,9 +163,9 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
       </section>
 
       {/* About Section */}
-      <section id="about" className="py-20 px-4 bg-gray-50">
+      <section id="about" className="bg-gray-50 px-4 py-14 sm:py-20">
         <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
+          <div className="grid items-center gap-8 md:grid-cols-2 md:gap-12">
             {config.about.image && (
               <div className="rounded-2xl overflow-hidden shadow-xl">
                 <img
@@ -187,7 +194,7 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
                           className="w-6 h-6 rounded-full flex items-center justify-center text-white text-sm"
                           style={{ backgroundColor: primaryColor }}
                         >
-                          ✓
+                          *
                         </span>
                         {highlight}
                       </li>
@@ -201,7 +208,7 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
 
       {/* Testimonials */}
       {config.testimonials && config.testimonials.items.length > 0 && (
-        <section id="testimonials" className="py-20 px-4 bg-white">
+        <section id="testimonials" className="bg-white px-4 py-14 sm:py-20">
           <div className="max-w-6xl mx-auto">
             <h2 className="text-3xl md:text-4xl font-bold text-center mb-4">
               {config.testimonials.title}
@@ -211,7 +218,7 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
                 {config.testimonials.subtitle}
               </p>
             )}
-            <div className="grid md:grid-cols-3 gap-8">
+            <div className="grid gap-6 md:grid-cols-3">
               {config.testimonials.items.map((testimonial, idx) => (
                 <div key={idx} className="p-6 rounded-2xl bg-gray-50 shadow-lg">
                   {testimonial.rating && (
@@ -260,21 +267,24 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
       {config.contact && (
         <section
           id="contact"
-          className="py-20 px-4"
-          style={{ backgroundColor: secondaryColor }}
+          className="px-4 py-14 sm:py-20"
+          style={{ backgroundColor: secondaryColor, color: textOnSecondary }}
         >
           <div className="max-w-4xl mx-auto">
-            <h2 className="text-3xl md:text-4xl font-bold text-center text-white mb-4">
+            <h2
+              className="mb-4 text-center text-3xl font-bold md:text-4xl"
+              style={{ color: textOnSecondary }}
+            >
               {config.contact.title}
             </h2>
             {config.contact.subtitle && (
-              <p className="text-white/80 text-center mb-12">
+              <p className="mb-12 text-center" style={{ color: mutedOnSecondary }}>
                 {config.contact.subtitle}
               </p>
             )}
             <div className="bg-white rounded-2xl shadow-2xl p-8 md:p-12">
               <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="grid md:grid-cols-2 gap-6">
+                <div className="grid gap-4 md:grid-cols-2 md:gap-6">
                   <input
                     type="text"
                     name="name"
@@ -305,14 +315,14 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
                 <button
                   type="submit"
                   className="w-full py-4 text-lg font-semibold rounded-lg text-white transition-all hover:opacity-90"
-                  style={{ backgroundColor: primaryColor }}
+                  style={{ backgroundColor: primaryColor, color: buttonTextOnPrimary }}
                 >
                   Send Message
                 </button>
               </form>
 
               {/* Contact Info */}
-              <div className="mt-8 pt-8 border-t border-gray-200 grid md:grid-cols-3 gap-4 text-center">
+              <div className="mt-8 grid gap-3 border-t border-gray-200 pt-8 text-center md:grid-cols-3">
                 {config.contact.email && (
                   <a
                     href={`mailto:${config.contact.email}`}
@@ -342,7 +352,7 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
 
       {/* Booking Section */}
       {config.booking && (
-        <section id="booking" className="py-20 px-4 bg-gray-50">
+        <section id="booking" className="bg-gray-50 px-4 py-14 sm:py-20">
           <div className="max-w-4xl mx-auto text-center">
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
               {config.booking.title}
@@ -362,12 +372,12 @@ export const ImageHeavyTemplate: React.FC<TemplateProps> = ({
       )}
 
       {/* Footer */}
-      <footer className="py-12 px-4 bg-gray-900 text-white">
+      <footer className="bg-gray-900 px-4 py-12 text-white">
         <div className="max-w-6xl mx-auto">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="flex flex-col items-center justify-between gap-5 md:flex-row">
             <p className="text-gray-400">{config.footer.copyrightText}</p>
             {config.footer.quickLinks && (
-              <nav className="flex gap-6">
+              <nav className="flex flex-wrap justify-center gap-4 sm:gap-6">
                 {config.footer.quickLinks.map((link, idx) => (
                   <a
                     key={idx}

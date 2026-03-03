@@ -3,10 +3,11 @@ import { useNavigate } from "react-router";
 import { Logo } from "../components/Logo";
 import { Button } from "../components/Button";
 import { Input } from "../components/Input";
-import { Sparkles, Chrome, Mail, X, CheckCircle } from "lucide-react";
+import { Sparkles, Chrome, Mail, X, CheckCircle, Search } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "sonner";
 import { getAccessToken } from "../lib/supabase";
+import { ThemeToggle } from "../components/ThemeToggle";
 
 // Dynamic API URL: uses the same host as the frontend but on port 3001
 const getApiUrl = () => {
@@ -127,10 +128,10 @@ export function AuthScreen() {
         }
         @keyframes glow-pulse {
           0%, 100% { 
-            filter: drop-shadow(0 0 6px rgba(247, 36, 222, 0.8)) drop-shadow(0 0 12px rgba(247, 36, 222, 0.6)) drop-shadow(0 0 18px rgba(247, 36, 222, 0.4));
+            filter: drop-shadow(0 0 4px rgba(247, 36, 222, 0.45)) drop-shadow(0 0 8px rgba(247, 36, 222, 0.3));
           }
           50% { 
-            filter: drop-shadow(0 0 10px rgba(247, 36, 222, 1)) drop-shadow(0 0 20px rgba(247, 36, 222, 0.8)) drop-shadow(0 0 30px rgba(247, 36, 222, 0.6));
+            filter: drop-shadow(0 0 6px rgba(247, 36, 222, 0.6)) drop-shadow(0 0 12px rgba(247, 36, 222, 0.4));
           }
         }
         .audit-button-wrapper {
@@ -176,18 +177,22 @@ export function AuthScreen() {
             onClick={() => navigate("/audit")}
             variant="outline"
             size="sm"
-            className="text-xs px-2 sm:px-3 py-1 h-auto whitespace-nowrap"
+            className="text-[11px] px-2 sm:px-2.5 py-0.5 h-7 whitespace-nowrap"
             style={
               {
                 backgroundColor: "rgba(247, 36, 222, 0.1)",
                 borderColor: "rgba(247, 36, 222, 0.6)",
                 boxShadow:
-                  "0 0 10px rgba(247, 36, 222, 0.8), 0 0 20px rgba(247, 36, 222, 0.6), 0 0 30px rgba(247, 36, 222, 0.4)",
+                  "0 0 6px rgba(247, 36, 222, 0.35), 0 0 12px rgba(247, 36, 222, 0.22)",
               } as React.CSSProperties
             }
           >
+            <Search className="w-3 h-3 mr-1" />
             Free SEO Audit
           </Button>
+        </div>
+        <div className="flex justify-end">
+          <ThemeToggle />
         </div>
       </div>
 

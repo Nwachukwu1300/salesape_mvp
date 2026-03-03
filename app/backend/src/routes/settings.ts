@@ -1,3 +1,8 @@
+import jwt from 'jsonwebtoken';
+import express, { type Request, type Response } from 'express';
+import prisma from '../prisma.js';
+
+const router = express.Router();
 
 // Helper: ensure token was issued recently (minutes)
 function recentAuth(req: any, minutes = 15) {
@@ -5,11 +10,11 @@ function recentAuth(req: any, minutes = 15) {
     const authHeader = req.headers['authorization'] || '';
     const token = authHeader.split(' ')[1];
     if (!token) return false;
-    const decoded: any = require('jsonwebtoken').decode(token);
+    const decoded: any = jwt.decode(token);
     if (!decoded) return false;
     const iat = decoded.iat || decoded.iat_seconds || decoded.auth_time;
     if (!iat) return false;
-    const issued = new Date(iat * (iat>1000000000?1000:1));
+    const issued = new Date(iat * (iat > 1000000000 ? 1000 : 1));
     const ageMs = Date.now() - issued.getTime();
     return ageMs <= minutes * 60 * 1000;
   } catch (err) {
@@ -18,21 +23,21 @@ function recentAuth(req: any, minutes = 15) {
 }
 
 // Simple in-memory rate limiter per user for danger endpoints
-const dangerRateMap: Record<string, {count:number, ts:number}> = {};
+const dangerRateMap: Record<string, { count: number; ts: number }> = {};
 function checkRateLimit(userId: string, limit = 3, windowMinutes = 10) {
   const now = Date.now();
   const rec = dangerRateMap[userId] || { count: 0, ts: now };
   if (now - rec.ts > windowMinutes * 60 * 1000) {
-    rec.count = 1; rec.ts = now; dangerRateMap[userId] = rec; return true;
+    rec.count = 1;
+    rec.ts = now;
+    dangerRateMap[userId] = rec;
+    return true;
   }
   if (rec.count >= limit) return false;
-  rec.count += 1; dangerRateMap[userId] = rec; return true;
+  rec.count += 1;
+  dangerRateMap[userId] = rec;
+  return true;
 }
-
-import express, { type Request, type Response } from 'express';
-import prisma from '../prisma.js';
-
-const router = express.Router();
 
 // Use authenticateToken middleware in index.ts when mounting this router so req.userId is available
 
@@ -55,7 +60,7 @@ router.post('/', async (req: Request, res: Response) => {
     const userId = (req as any).userId as string;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { memoryEnabled, topK, ttlDays, twoFA, growthMode } = req.body || {};
+    const { memoryEnabled, topK, ttlDays, twoFA } = req.body || {};
 
     const upserted = await prisma.userSettings.upsert({
       where: { userId },
@@ -65,14 +70,12 @@ router.post('/', async (req: Request, res: Response) => {
         topK: Number(topK) || 5,
         ttlDays: Number(ttlDays) || 30,
         twoFA: !!twoFA,
-        growthMode: growthMode || 'BALANCED',
       },
       update: {
         memoryEnabled: !!memoryEnabled,
         topK: Number(topK) || 5,
         ttlDays: Number(ttlDays) || 30,
         twoFA: !!twoFA,
-        growthMode: growthMode || 'BALANCED',
       },
     });
 

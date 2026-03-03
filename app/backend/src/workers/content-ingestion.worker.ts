@@ -9,7 +9,7 @@
  */
 
 import { Worker, Job } from 'bullmq';
-import { contentIngestionQueue, enqueueRepurposing } from '../queues/index.js';
+import { enqueueRepurposing } from '../queues/index.js';
 import type { ContentIngestionJob } from '../queues/index.js';
 import { getRedisClient, createRedisClient } from '../utils/redis-client.js';
 import { createContextLogger } from '../utils/logger.js';

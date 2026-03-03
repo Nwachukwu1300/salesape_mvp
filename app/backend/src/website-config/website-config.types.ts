@@ -172,6 +172,7 @@ export interface WebsiteConfigGenerationInput {
     };
   };
   templateId: string;
+  variationSeed?: string;
   scrapedData?: {
     email?: string;
     phone?: string;

@@ -20,6 +20,7 @@ import { PrismaClient } from '@prisma/client';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import * as fs from 'fs';
+import * as os from 'os';
 import type { ContentGenerationJob } from '../queues/index.js';
 import { processVideo, getVideoMetadata } from '../services/video-processor.service.js';
 import { enhanceReelCaption } from '../services/seo-aeo-enhancement.service.js';
@@ -34,7 +35,7 @@ const worker = new Worker<ContentGenerationJob>(
     const startTime = Date.now();
 
     try {
-      const { projectId, businessId, inputType, inputUrl, inputText, reelsRequested = 3, style = 'educational' } = job.data;
+      const { projectId, businessId, inputType, inputUrl, inputText, reelsRequested = 3, style = 'educational', growthMode: jobGrowthMode } = job.data;
 
       // Get content project and business
       const project = await (prisma as any).contentProject.findUnique({
@@ -50,7 +51,7 @@ const worker = new Worker<ContentGenerationJob>(
       const business = await (prisma as any).business.findUnique({
         where: { id: businessId },
       });
-      const growthMode: string = (business as any)?.growthMode || 'BALANCED';
+      const growthMode: string = jobGrowthMode || (business as any)?.growthMode || 'BALANCED';
 
       // Adjust reel count based on growth mode
       let reelsCount = 3;
@@ -361,7 +362,7 @@ function calculatePrePublishScore(hook: string, script: string): number {
  */
 async function downloadVideo(videoUrl: string): Promise<string> {
   try {
-    const tempPath = `/tmp/video-${Date.now()}.mp4`;
+    const tempPath = `${os.tmpdir()}/video-${Date.now()}.mp4`;
     
     // Download with axios and save to temp file
     const response = await axios.get(videoUrl, { responseType: 'arraybuffer', timeout: 60000 });

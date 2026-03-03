@@ -115,6 +115,25 @@ export async function updateContentInputMetadata(id: string, metadata: Record<st
 }
 
 /**
+ * Update content input fields
+ */
+export async function updateContentInput(
+  id: string,
+  input: UpdateContentInputInput
+): Promise<ContentInput> {
+  try {
+    const content = await prisma.contentInput.update({
+      where: { id },
+      data: input as any,
+    });
+    return content as ContentInput;
+  } catch (error) {
+    console.error('Failed to update content input:', error);
+    throw error;
+  }
+}
+
+/**
  * Delete content input
  */
 export async function deleteContentInput(id: string): Promise<void> {

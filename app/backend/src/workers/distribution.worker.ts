@@ -11,7 +11,7 @@
  */
 
 import { Worker, Job } from 'bullmq';
-import { distributionQueue, enqueueAnalyticsPolling } from '../queues/index.js';
+import { enqueueAnalyticsPolling } from '../queues/index.js';
 import type { DistributionJob, AnalyticsPollingJob } from '../queues/index.js';
 import { getRedisClient, createRedisClient } from '../utils/redis-client.js';
 import { createContextLogger } from '../utils/logger.js';

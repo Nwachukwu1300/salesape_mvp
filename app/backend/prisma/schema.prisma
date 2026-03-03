@@ -296,6 +296,7 @@ model ConversationSession {
   messages  Json
   extracted Json?
   status    String   @default("active")
+  totalQuestions Int @default(6)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -373,6 +374,13 @@ model RepurposedContent {
   content           String
   caption           String?
   hashtags          Json?
+  assetUrl          String?
+  assetPath         String?
+  score             Float?
+  scoreBreakdown    Json?
+  trendHooks        Json?
+  performance       Json?
+  metadata          Json?
   status            String                 @default("draft") // draft, approved, published
   publishedAt       DateTime?
   createdAt         DateTime               @default(now())

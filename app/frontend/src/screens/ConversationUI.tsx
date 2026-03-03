@@ -35,7 +35,7 @@ export const ConversationUI: React.FC = () => {
         const response = await startConversation();
 
         // Prepare an introductory message from the conversation AI (APE)
-        const intro = `Hi — I'm APE, your SalesApe assistant. I'll ask a few questions to understand your business and generate a website tailored to your needs.`;
+        const intro = `Hi, I'm APE. I will ask a few quick questions to understand your business and generate your website.`;
 
         // Save conversation state to sessionStorage for persistence
         const conversationState: ConversationState = {
@@ -47,7 +47,7 @@ export const ConversationUI: React.FC = () => {
           extracted: {},
           isComplete: false,
           questionNumber: 1,
-          totalQuestions: 12,
+          totalQuestions: response.totalQuestions || 11,
         };
 
         sessionStorage.setItem(
