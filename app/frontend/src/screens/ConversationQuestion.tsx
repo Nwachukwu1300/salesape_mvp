@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { Room, RoomEvent, RemoteTrack, Track } from "livekit-client";
 import {
   Send,
   ArrowLeft,
@@ -39,6 +40,10 @@ export const ConversationQuestion: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioControllerRef = useRef<AbortController | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const localUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const beyondRoomRef = useRef<Room | null>(null);
+  const beyondVideoHostRef = useRef<HTMLDivElement | null>(null);
+  const beyondAudioHostRef = useRef<HTMLDivElement | null>(null);
 
   const [state, setstate] = useState<ConversationState | null>(null);
   const [userInput, setUserInput] = useState("");
@@ -92,6 +97,10 @@ export const ConversationQuestion: React.FC = () => {
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [enableVoiceInput, setEnableVoiceInput] = useState(true);
   const [enableVoiceOutput, setEnableVoiceOutput] = useState(true);
+  const [avatarLoading, setAvatarLoading] = useState(false);
+  const [voiceProvider, setVoiceProvider] = useState<"openai" | "beyond" | "default" | "off">("off");
+  const [beyondConnected, setBeyondConnected] = useState(false);
+  const [beyondAgentName, setBeyondAgentName] = useState("ANNA");
 
   // Initialize voice recognition and synthesis
   useEffect(() => {
@@ -164,7 +173,153 @@ export const ConversationQuestion: React.FC = () => {
       audioUrlRef.current = null;
     }
 
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      localUtteranceRef.current = null;
+    }
+
     setIsSpeaking(false);
+  };
+
+  const disconnectBeyondSession = async () => {
+    if (beyondRoomRef.current) {
+      try {
+        await beyondRoomRef.current.disconnect();
+      } catch {}
+      beyondRoomRef.current = null;
+    }
+    if (beyondVideoHostRef.current) {
+      beyondVideoHostRef.current.innerHTML = "";
+    }
+    if (beyondAudioHostRef.current) {
+      beyondAudioHostRef.current.innerHTML = "";
+    }
+    setBeyondConnected(false);
+  };
+
+  const attachBeyondTrack = (track: RemoteTrack) => {
+    const element = track.attach();
+    if (track.kind === Track.Kind.Video) {
+      element.classList.add("h-full", "w-full", "object-cover");
+      if (beyondVideoHostRef.current) {
+        beyondVideoHostRef.current.innerHTML = "";
+        beyondVideoHostRef.current.appendChild(element);
+      }
+      return;
+    }
+
+    if (track.kind === Track.Kind.Audio && beyondAudioHostRef.current) {
+      beyondAudioHostRef.current.innerHTML = "";
+      beyondAudioHostRef.current.appendChild(element);
+    }
+  };
+
+  const ensureBeyondAvatar = async (): Promise<boolean> => {
+    const token = getAccessToken();
+    if (!token) return false;
+    if (beyondConnected && beyondRoomRef.current) return true;
+
+    try {
+      setAvatarLoading(true);
+      const configResponse = await fetch(`${API_BASE}/api/beyond/config`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!configResponse.ok) {
+        return false;
+      }
+
+      const configPayload = await configResponse.json().catch(() => ({}));
+      if (configPayload?.agentId === "4a2fc97d-b70c-49c2-845c-4ed7ee511065") {
+        setBeyondAgentName("ANNA");
+      }
+
+      const response = await fetch(`${API_BASE}/api/beyond/call`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        return false;
+      }
+
+      const payload = await response.json().catch(() => ({}));
+      const livekitUrl = String(payload?.call?.livekit_url || "").trim();
+      const livekitToken = String(payload?.call?.livekit_token || "").trim();
+      if (!livekitUrl || !livekitToken) {
+        return false;
+      }
+
+      await disconnectBeyondSession();
+
+      const room = new Room();
+      room.on(RoomEvent.TrackSubscribed, (track) => {
+        attachBeyondTrack(track as RemoteTrack);
+      });
+      room.on(RoomEvent.Disconnected, () => {
+        setBeyondConnected(false);
+      });
+      room.on(RoomEvent.ConnectionStateChanged, (state) => {
+        if (String(state).toLowerCase() === "connected") {
+          setBeyondConnected(true);
+          setIsSpeaking(true);
+        }
+      });
+
+      await room.connect(livekitUrl, livekitToken);
+      beyondRoomRef.current = room;
+
+      room.remoteParticipants.forEach((participant) => {
+        participant.trackPublications.forEach((publication) => {
+          if (publication.track) {
+            attachBeyondTrack(publication.track as RemoteTrack);
+          }
+        });
+      });
+
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setAvatarLoading(false);
+    }
+  };
+
+  const speakWithDefaultVoice = async (text: string): Promise<boolean> => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      return false;
+    }
+
+    return await new Promise<boolean>((resolve) => {
+      try {
+        const utterance = new SpeechSynthesisUtterance(text);
+        localUtteranceRef.current = utterance;
+        utterance.rate = 1;
+        utterance.pitch = 1;
+        utterance.onstart = () => {
+          setVoiceProvider("default");
+          setIsSpeaking(true);
+        };
+        utterance.onend = () => {
+          setIsSpeaking(false);
+          resolve(true);
+        };
+        utterance.onerror = () => {
+          setIsSpeaking(false);
+          resolve(false);
+        };
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        resolve(false);
+      }
+    });
   };
 
   const speakMessage = async (text: string) => {
@@ -172,6 +327,7 @@ export const ConversationQuestion: React.FC = () => {
     if (!text.trim()) return;
 
     stopAudio();
+    setVoiceProvider("off");
 
     const token = getAccessToken();
     if (!token) {
@@ -186,28 +342,6 @@ export const ConversationQuestion: React.FC = () => {
 
     try {
       setIsSpeaking(true);
-
-      // Start local speech immediately
-      let localSpeaking = false;
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        try {
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.rate = 1;
-          utterance.pitch = 1;
-          utterance.onstart = () => {
-            localSpeaking = true;
-            setIsSpeaking(true);
-          };
-          utterance.onend = () => {
-            localSpeaking = false;
-          };
-          utterance.onerror = () => {
-            localSpeaking = false;
-          };
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.speak(utterance);
-        } catch {}
-      }
 
       const response = await fetch(url, {
         method: "POST",
@@ -242,6 +376,7 @@ export const ConversationQuestion: React.FC = () => {
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
+      setVoiceProvider("openai");
 
       if (canStream && response.body) {
         const mediaSource = new MediaSource();
@@ -309,9 +444,20 @@ export const ConversationQuestion: React.FC = () => {
     } catch (err) {
       if ((err as any)?.name === "AbortError") return;
       stopAudio();
-      const message = err instanceof Error ? err.message : "Failed to play audio";
-      setError(message);
-      // Keep local TTS if it already started; no extra fallback here.
+
+      // Beyond Presence is used here as the avatar/agent surface when OpenAI TTS fails.
+      // If Beyond is unavailable too, fall back to the browser's default voice.
+      const beyondReady = await ensureBeyondAvatar();
+      if (beyondReady) {
+        setVoiceProvider("beyond");
+        setIsSpeaking(true);
+        return;
+      }
+      const defaultSpoke = await speakWithDefaultVoice(text);
+      if (!defaultSpoke) {
+        const message = err instanceof Error ? err.message : "Failed to play audio";
+        setError(message);
+      }
     }
   };
 
@@ -355,12 +501,15 @@ export const ConversationQuestion: React.FC = () => {
   useEffect(() => {
     if (!enableVoiceOutput) {
       stopAudio();
+      void disconnectBeyondSession();
+      setVoiceProvider("off");
     }
   }, [enableVoiceOutput]);
 
   useEffect(() => {
     return () => {
       stopAudio();
+      void disconnectBeyondSession();
     };
   }, []);
 
@@ -478,7 +627,6 @@ export const ConversationQuestion: React.FC = () => {
         if (enableVoiceOutput) {
           speakMessage(newState.currentQuestion);
         }
-
         // Auto-generate when user confirms "Yes"
         const yes = userInput.trim().toLowerCase();
         const confirmations = new Set([
@@ -524,7 +672,6 @@ export const ConversationQuestion: React.FC = () => {
         if (enableVoiceOutput) {
           speakMessage(newState.currentQuestion);
         }
-
         setTimeout(() => inputRef.current?.focus(), 100);
       }
     } catch (err) {
@@ -614,16 +761,62 @@ export const ConversationQuestion: React.FC = () => {
       </div>
 
       {/* Main Content - Question Display */}
-      <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 py-6 md:py-10">
-        <div className="max-w-3xl w-full space-y-6">
-          {/* Greeting or Question Text */}
+      <div className="flex-1 px-4 sm:px-6 py-6 md:py-10">
+        <div className="mx-auto grid max-w-6xl items-center gap-6 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#f724de]/20 bg-[#f724de]/8 px-3 py-1 text-xs font-medium text-[#b5129c] dark:text-[#ff7aee]">
+              <span className="h-2 w-2 rounded-full bg-[#f724de]" />
+              APE conversation
+            </div>
             <div className="text-2xl sm:text-3xl md:text-4xl font-semibold text-gray-900 dark:text-white leading-tight whitespace-pre-wrap">
               {state.currentQuestion}
             </div>
           </div>
 
-          
+          <div className="overflow-hidden rounded-[28px] border border-gray-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.08)] dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+              <div>
+                <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {beyondAgentName} Avatar
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">
+                  {avatarLoading
+                    ? "Preparing Beyond session"
+                    : voiceProvider === "openai"
+                      ? "Voice: OpenAI TTS"
+                      : voiceProvider === "beyond"
+                        ? "Voice fallback: Beyond LiveKit"
+                        : voiceProvider === "default"
+                          ? "Voice fallback: browser default"
+                          : "Voice idle"}
+                </div>
+              </div>
+              <div className="rounded-full bg-[#f724de]/10 px-2 py-1 text-[11px] font-medium text-[#b5129c] dark:text-[#ff7aee]">
+                Live
+              </div>
+            </div>
+
+            <div className="aspect-[4/5] bg-[radial-gradient(circle_at_top,_rgba(247,36,222,0.16),_transparent_42%),linear-gradient(180deg,#fff_0%,#f8fafc_100%)] dark:bg-[radial-gradient(circle_at_top,_rgba(247,36,222,0.16),_transparent_42%),linear-gradient(180deg,#111827_0%,#030712_100%)]">
+              {beyondConnected ? (
+                <>
+                  <div ref={beyondVideoHostRef} className="h-full w-full" />
+                  <div ref={beyondAudioHostRef} className="hidden" />
+                </>
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                  <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-[#f724de] text-2xl font-semibold text-white">
+                    {beyondAgentName.slice(0, 1)}
+                  </div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                    Beyond avatar on standby
+                  </p>
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    OpenAI TTS is primary. Beyond takes over only if OpenAI audio fails.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -759,7 +952,13 @@ export const ConversationQuestion: React.FC = () => {
         )}
 
         <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2">
-          {isSpeaking ? "🔊 AI is speaking..." : "Powered by SalesAPE AI"}
+          {isSpeaking
+            ? voiceProvider === "openai"
+              ? "AI is speaking with OpenAI TTS"
+              : voiceProvider === "beyond"
+                ? "Beyond avatar is handling voice and video"
+                : "AI is speaking with the default voice"
+            : "Powered by SalesAPE AI"}
         </p>
       </div>
     </div>

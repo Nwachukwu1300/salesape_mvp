@@ -214,10 +214,11 @@ export async function repurposeBusinessContent(
   businessId: string,
   contentId: string,
   platforms: string[],
+  aspectRatio?: "9:16" | "16:9" | "1:1" | "4:5",
 ) {
   const resp = await client.post(
     `/businesses/${businessId}/content-inputs/${contentId}/repurpose`,
-    { platforms },
+    { platforms, aspectRatio },
   );
   return resp.data as {
     message: string;
@@ -225,6 +226,7 @@ export async function repurposeBusinessContent(
     status?: string;
     contentInputId?: string;
     platforms?: string[];
+    aspectRatio?: string;
   };
 }
 

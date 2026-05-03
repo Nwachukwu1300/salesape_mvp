@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import ProgressCircle from '../components/ProgressCircle.tsx';
+import { ProgressCircle } from '../src/components/ProgressCircle.tsx';
 
 describe('ProgressCircle', () => {
   it('renders the percentage and label', () => {

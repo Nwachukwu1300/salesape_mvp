@@ -474,6 +474,141 @@ app.post('/api/tts', authenticateToken, async (req: AuthRequest, res: Response) 
   }
 });
 
+app.get('/api/beyond/config', authenticateToken, async (_req: AuthRequest, res: Response) => {
+  try {
+    const agentId = String(process.env.BEYOND_PRESENCE_AGENT_ID || '').trim();
+    const agentUrl = String(process.env.BEYOND_PRESENCE_AGENT_URL || '').trim();
+    const avatarId = String(process.env.BEYOND_PRESENCE_AVATAR_ID || '').trim();
+
+    if (!agentId && !agentUrl) {
+      return res.status(404).json({ error: 'Beyond Presence agent is not configured' });
+    }
+
+    res.json({
+      ok: true,
+      agentId: agentId || null,
+      avatarId: avatarId || null,
+      embedUrl: agentUrl || `https://bey.chat/${agentId}`,
+    });
+  } catch (err) {
+    logger.error('Beyond config error', { error: String(err) });
+    res.status(500).json({ error: 'Failed to load Beyond Presence config' });
+  }
+});
+
+app.get('/api/beyond/agents', authenticateToken, async (_req: AuthRequest, res: Response) => {
+  try {
+    const apiKey = String(process.env.BEYOND_PRESENCE_API_KEY || '').trim();
+    if (!apiKey) {
+      return res.status(500).json({ error: 'BEYOND_PRESENCE_API_KEY missing' });
+    }
+
+    const response = await fetch('https://api.bey.dev/v1/agents', {
+      method: 'GET',
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const payload: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: 'Failed to list Beyond agents',
+        details: payload,
+      });
+    }
+
+    const rawAgents = Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload)
+        ? payload
+        : [];
+
+    const agents = rawAgents.map((agent: any) => ({
+      id: agent?.id || null,
+      name: agent?.name || null,
+      avatarId: agent?.avatar_id || null,
+      status: agent?.status || null,
+    }));
+
+    return res.json({ ok: true, agents });
+  } catch (err) {
+    logger.error('Beyond list agents error', { error: String(err) });
+    return res.status(500).json({ error: 'Failed to list Beyond agents' });
+  }
+});
+
+app.post('/api/beyond/call', authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const apiKey = String(process.env.BEYOND_PRESENCE_API_KEY || '').trim();
+    const agentId = String(process.env.BEYOND_PRESENCE_AGENT_ID || '').trim();
+
+    if (!apiKey) {
+      return res.status(500).json({ error: 'BEYOND_PRESENCE_API_KEY missing' });
+    }
+    if (!agentId) {
+      return res.status(400).json({ error: 'BEYOND_PRESENCE_AGENT_ID missing' });
+    }
+
+    const response = await fetch('https://api.bey.dev/v1/calls', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        agent_id: agentId,
+        metadata: {
+          source: 'salesape',
+          userId: req.userId || null,
+        },
+      }),
+    });
+
+    const payload: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: 'Beyond call creation failed',
+        details: payload,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      call: payload,
+    });
+  } catch (err) {
+    logger.error('Beyond call creation error', { error: String(err) });
+    return res.status(500).json({ error: 'Failed to create Beyond call' });
+  }
+});
+
+app.post('/api/beyond/openai/v1/chat/completions', authenticateBeyondExternalLlm, async (req: Request, res: Response) => {
+  try {
+    const model = String(req.body?.model || process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini');
+    const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const stream = Boolean(req.body?.stream);
+
+    const result = await generateConversationReplyFromExternalMessages(messages);
+    const completionId = `chatcmpl_${crypto.randomBytes(12).toString('hex')}`;
+
+    if (stream) {
+      return streamOpenAIChatCompletion(res, completionId, model, result.content);
+    }
+
+    return res.json(toOpenAIChatCompletion(completionId, model, result.content));
+  } catch (err) {
+    logger.error('Beyond external LLM error', { error: String(err) });
+    return res.status(500).json({
+      error: {
+        message: 'Failed to generate Beyond external LLM response',
+        type: 'server_error',
+      },
+    });
+  }
+});
+
 // Helper to normalize route params which can be string | string[] | undefined
 function paramToString(p: string | string[] | undefined): string | undefined {
   if (Array.isArray(p)) return p[0];
@@ -483,6 +618,229 @@ function paramToString(p: string | string[] | undefined): string | undefined {
 function sseSend(res: Response, data: string, event?: string) {
   if (event) res.write(`event: ${event}\n`);
   res.write(`data: ${data}\n\n`);
+}
+
+function readAssistantTextFromResponse(resp: any): string {
+  return (
+    resp?.output_text ||
+    resp?.output?.[0]?.content?.[0]?.text ||
+    ''
+  );
+}
+
+function toOpenAIChatCompletion(id: string, model: string, content: string) {
+  return {
+    id,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content,
+        },
+        finish_reason: 'stop',
+      },
+    ],
+  };
+}
+
+function streamOpenAIChatCompletion(res: Response, id: string, model: string, content: string) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  sseSend(res, JSON.stringify({
+    id,
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [
+      {
+        index: 0,
+        delta: { role: 'assistant' },
+        finish_reason: null,
+      },
+    ],
+  }));
+
+  for (const token of content.split(/(\s+)/).filter(Boolean)) {
+    sseSend(res, JSON.stringify({
+      id,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [
+        {
+          index: 0,
+          delta: { content: token },
+          finish_reason: null,
+        },
+      ],
+    }));
+  }
+
+  sseSend(res, JSON.stringify({
+    id,
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [
+      {
+        index: 0,
+        delta: {},
+        finish_reason: 'stop',
+      },
+    ],
+  }));
+  res.write('data: [DONE]\n\n');
+  res.end();
+}
+
+function getExternalLlmHistory(messages: any[]): Array<{ role: string; content: string }> {
+  return (Array.isArray(messages) ? messages : [])
+    .map((m: any) => ({
+      role: String(m?.role || ''),
+      content: typeof m?.content === 'string'
+        ? m.content
+        : Array.isArray(m?.content)
+          ? m.content
+              .map((part: any) => String(part?.text || part?.content || ''))
+              .join('')
+          : String(m?.content || ''),
+    }))
+    .filter((m) => ['user', 'assistant', 'system'].includes(m.role) && m.content.trim().length > 0);
+}
+
+async function generateConversationReplyFromExternalMessages(messages: any[]) {
+  const normalizedMessages = getExternalLlmHistory(messages);
+  const userMessages = normalizedMessages.filter((m) => m.role === 'user');
+  const latestUserMessage = userMessages[userMessages.length - 1]?.content?.trim() || '';
+
+  if (!latestUserMessage) {
+    const fallbackQuestion = generateNextQuestion('business_name');
+    return {
+      content: fallbackQuestion,
+      stage: 'business_name',
+      extracted: {},
+      isComplete: false,
+    };
+  }
+
+  let extracted: any = {};
+  const priorUserMessages = userMessages.slice(0, -1);
+
+  for (const entry of priorUserMessages) {
+    const stage = getCurrentStage(extracted);
+    const candidate = extractDataFromMessage(entry.content, stage, extracted);
+    const validation = isStageDataValid(stage, candidate);
+    if (validation.valid || stage === 'greeting') {
+      extracted = candidate;
+    }
+  }
+
+  const currentStage = getCurrentStage(extracted);
+  const candidateExtracted = extractDataFromMessage(latestUserMessage, currentStage, extracted);
+  const dataValidation = isStageDataValid(currentStage, candidateExtracted);
+
+  if (!dataValidation.valid && currentStage !== 'greeting') {
+    const retryQuestion = `${dataValidation.message || 'Please provide a valid response.'} ${generateNextQuestion(currentStage)}`;
+    return {
+      content: retryQuestion,
+      stage: currentStage,
+      extracted,
+      isComplete: false,
+    };
+  }
+
+  extracted = candidateExtracted;
+  const nextStage = getCurrentStage(extracted);
+  const recentMessages = normalizedMessages.slice(-8);
+  let assistantContent = '';
+
+  if (nextStage === 'summary') {
+    try {
+      extracted = await refineBusinessUnderstandingWithModel(extracted, normalizedMessages);
+      if (!extracted.seoKeywords || extracted.seoKeywords.length < 5) {
+        const descriptionSeed = [
+          extracted.name,
+          extracted.category,
+          extracted.location,
+          (extracted.services || []).join(', '),
+          extracted.valueProposition,
+          extracted.targetAudience,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        extracted.seoKeywords = generateSEOKeywords(extracted.name || 'Business', descriptionSeed);
+      }
+
+      const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini';
+      const prompt = buildConversationSummaryPrompt(extracted);
+      const resp = await (OpenAIClient as any).responses.create({
+        model,
+        input: prompt,
+      });
+      assistantContent = readAssistantTextFromResponse(resp)?.trim() || generateSummaryMessage(extracted);
+    } catch {
+      assistantContent = generateSummaryMessage(extracted);
+    }
+
+    const normalizedExtracted = normalizeOnboardingExtracted(extracted);
+    const validation = validateAIResponse(normalizedExtracted);
+    const userConfirmed = isAffirmativeConfirmation(latestUserMessage);
+    return {
+      content: assistantContent,
+      stage: nextStage,
+      extracted: validation.valid ? validation.data : normalizedExtracted,
+      isComplete: Boolean(validation.valid && userConfirmed),
+    };
+  }
+
+  const requiredQuestion = generateNextQuestion(nextStage);
+  try {
+    const prompt = buildConversationQuestionPrompt({
+      stage: nextStage,
+      requiredQuestion,
+      extracted,
+      recentMessages,
+    });
+    const model = process.env.OPENAI_CHAT_MODEL || 'gpt-5-mini';
+    const resp = await (OpenAIClient as any).responses.create({
+      model,
+      input: prompt,
+    });
+    assistantContent = readAssistantTextFromResponse(resp)?.trim() || requiredQuestion;
+  } catch {
+    assistantContent = requiredQuestion;
+  }
+
+  return {
+    content: assistantContent,
+    stage: nextStage,
+    extracted,
+    isComplete: false,
+  };
+}
+
+function authenticateBeyondExternalLlm(req: Request, res: Response, next: NextFunction) {
+  const configuredSecret = String(process.env.BEYOND_EXTERNAL_LLM_SECRET || '').trim();
+  if (!configuredSecret) {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(500).json({ error: 'BEYOND_EXTERNAL_LLM_SECRET missing' });
+    }
+    return next();
+  }
+
+  const authHeader = String(req.headers.authorization || '');
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token || token !== configuredSecret) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
 }
 
 function buildConversationQuestionPrompt(params: {
@@ -5281,7 +5639,7 @@ app.post('/businesses/:businessId/content-inputs/:contentId/repurpose', authenti
   try {
     const businessId = paramToString(req.params.businessId);
     const contentId = paramToString(req.params.contentId);
-    const { platforms } = req.body;
+    const { platforms, aspectRatio } = req.body;
 
     if (!businessId || !contentId) return res.status(400).json({ error: 'Business id and content id are required' });
     if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
@@ -5303,6 +5661,12 @@ app.post('/businesses/:businessId/content-inputs/:contentId/repurpose', authenti
       return res.status(400).json({ error: 'No valid platforms provided' });
     }
 
+    const normalizedAspectRatio = String(aspectRatio || '').trim();
+    const allowedAspectRatios = new Set(['9:16', '16:9', '1:1', '4:5']);
+    if (normalizedAspectRatio && !allowedAspectRatios.has(normalizedAspectRatio)) {
+      return res.status(400).json({ error: 'Invalid aspectRatio. Allowed values: 9:16, 16:9, 1:1, 4:5' });
+    }
+
     await updateContentInput(contentId, { status: 'processing' as any });
 
     const queuedJob = await enqueueRepurposing({
@@ -5310,6 +5674,7 @@ app.post('/businesses/:businessId/content-inputs/:contentId/repurpose', authenti
       contentInputId: contentId,
       businessId,
       platforms: normalizedPlatforms as any,
+      aspectRatio: (normalizedAspectRatio || undefined) as any,
       originContent: contentInput.content || contentInput.url || '',
       businessName: business.name,
       businessContext: typeof contentInput.metadata === 'string'
@@ -5333,6 +5698,7 @@ app.post('/businesses/:businessId/content-inputs/:contentId/repurpose', authenti
       status: 'processing',
       contentInputId: contentId,
       platforms: normalizedPlatforms,
+      aspectRatio: normalizedAspectRatio || 'platform-default',
     });
   } catch (err) {
     logger.error('Generate repurposed content error', { error: String(err) });

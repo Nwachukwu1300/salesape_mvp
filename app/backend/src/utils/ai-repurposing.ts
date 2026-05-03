@@ -20,6 +20,142 @@ interface RepurposedContentOutput {
   bestTimeToPost?: string;
 }
 
+function buildRepurposePrompt(
+  sourceContent: string,
+  platform: Platform,
+  businessName: string,
+  businessContext?: string
+): string {
+  return `Please repurpose this content for ${platform}.
+
+Original Content: "${sourceContent}"
+Business: ${businessName}${businessContext ? `\nContext: ${businessContext}` : ''}
+
+Respond with ONLY a valid JSON object (no markdown, no code blocks) with these fields:
+{
+  "content": "platform-specific content",
+  "caption": "the main caption/post text",
+  "hashtags": ["tag1", "tag2"],
+  "callToAction": "what action should people take",
+  "bestTimeToPost": "when to post on this platform"
+}`;
+}
+
+function parseRepurposeOutput(
+  responseText: string,
+  sourceContent: string
+): RepurposedContentOutput | null {
+  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      content: parsed.content || sourceContent.substring(0, 2200),
+      caption: parsed.caption || undefined,
+      hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
+      callToAction: parsed.callToAction || undefined,
+      bestTimeToPost: parsed.bestTimeToPost || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function callOpenAINonStreaming(prompt: string): Promise<string> {
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${openaiApiKey}`,
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_REPURPOSE_MODEL_NON_STREAM || 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert social media strategist specializing in content repurposing.
+Your job is to adapt content intelligently for different social media platforms while maintaining brand voice and maximizing engagement.`,
+        },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 500,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`OpenAI non-stream failed: ${response.status} ${text}`);
+  }
+
+  const data: any = await response.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+async function callOpenAIStreaming(prompt: string): Promise<string> {
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${openaiApiKey}`,
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_REPURPOSE_MODEL_STREAM || 'gpt-5-mini',
+      stream: true,
+      max_output_tokens: 700,
+      input: [
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'input_text',
+              text: 'You are an expert social media strategist. Return strict JSON only.',
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: prompt }],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok || !response.body) {
+    const text = await response.text();
+    throw new Error(`OpenAI stream failed: ${response.status} ${text}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let output = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        const event = JSON.parse(payload);
+        if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+          output += event.delta;
+        }
+      } catch {
+        // ignore malformed chunks
+      }
+    }
+  }
+
+  return output.trim();
+}
+
 /**
  * Generate platform-specific content using Claude AI
  * Intelligently adapts content for each platform's best practices
@@ -108,61 +244,28 @@ export async function repurposeContentWithOpenAI(
     if (!openaiApiKey) {
       return generateFallbackContent(sourceContent, platform, businessName);
     }
+    const prompt = buildRepurposePrompt(sourceContent, platform, businessName, businessContext);
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openaiApiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4-turbo',
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert social media strategist specializing in content repurposing. 
-Your job is to adapt content intelligently for different social media platforms while maintaining brand voice and maximizing engagement.`,
-          },
-          {
-            role: 'user',
-            content: `Please repurpose this content for ${platform}:
-            
-Original Content: "${sourceContent}"
-Business: ${businessName}${businessContext ? `\nContext: ${businessContext}` : ''}
+    // Primary path: live streaming response for richer content reasoning.
+    try {
+      const streamedText = await callOpenAIStreaming(prompt);
+      const parsed = parseRepurposeOutput(streamedText, sourceContent);
+      if (parsed) return parsed;
+    } catch (streamErr) {
+      console.warn('OpenAI streaming repurpose failed, trying non-stream fallback', {
+        error: String(streamErr),
+      });
+    }
 
-Respond with ONLY a valid JSON object (no markdown, no code blocks) with these fields:
-{
-  "content": "platform-specific content",
-  "caption": "the main caption/post text",
-  "hashtags": ["tag1", "tag2"],
-  "callToAction": "what action should people take",
-  "bestTimeToPost": "when to post on this platform"
-}`,
-          },
-        ],
-        temperature: 0.7,
-        max_tokens: 500,
-      }),
-    });
-
-    const data: any = await response.json();
-    const responseText = data.choices?.[0]?.message?.content || '';
-
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          content: parsed.content || sourceContent.substring(0, 2200),
-          caption: parsed.caption || undefined,
-          hashtags: parsed.hashtags || [],
-          callToAction: parsed.callToAction || undefined,
-          bestTimeToPost: parsed.bestTimeToPost || undefined,
-        };
-      } catch (parseErr) {
-        console.warn('Failed to parse OpenAI response', parseErr);
-        return generateFallbackContent(sourceContent, platform, businessName);
-      }
+    // Fallback path: non-streaming OpenAI.
+    try {
+      const text = await callOpenAINonStreaming(prompt);
+      const parsed = parseRepurposeOutput(text, sourceContent);
+      if (parsed) return parsed;
+    } catch (nonStreamErr) {
+      console.warn('OpenAI non-stream repurpose failed, falling back to templates', {
+        error: String(nonStreamErr),
+      });
     }
 
     return generateFallbackContent(sourceContent, platform, businessName);

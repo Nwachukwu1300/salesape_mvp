@@ -9,9 +9,9 @@
     "start:detached-node": "node ./scripts/run-server.cjs",
     "health-check": "node ./scripts/health-check.js",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand",
-    "test:unit": "jest --runInBand",
-    "test:integration": "jest --runInBand --testPathPattern=integration"
+    "test": "npm run typecheck && npm run test:unit",
+    "test:unit": "node --experimental-vm-modules ./scripts/run-jest.cjs --runInBand --testPathIgnorePatterns=integration",
+    "test:integration": "node --experimental-vm-modules ./scripts/run-jest.cjs --runInBand --testPathPattern=integration"
   },
   "keywords": [],
   "author": "",

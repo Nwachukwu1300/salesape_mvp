@@ -28,6 +28,7 @@ import { ArrowLeft, Plus, Upload } from "lucide-react";
 type InputType = "text" | "blog_url" | "video" | "audio";
 
 const PLATFORM_OPTIONS = ["instagram", "tiktok", "youtube", "linkedin"] as const;
+const ASPECT_RATIO_OPTIONS = ["9:16", "16:9", "1:1", "4:5"] as const;
 
 const STATUS_VARIANT: Record<string, string> = {
   processing: "warning",
@@ -80,6 +81,8 @@ function ContentStudioContent() {
   const [scheduleSelection, setScheduleSelection] = useState<Record<string, boolean>>({});
   const [bulkScheduleTime, setBulkScheduleTime] = useState("");
   const [editingSchedule, setEditingSchedule] = useState<Record<string, string>>({});
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([...PLATFORM_OPTIONS]);
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<(typeof ASPECT_RATIO_OPTIONS)[number]>("9:16");
   const activeTab = searchParams.get("tab") === "generate" ? "generate" : "repurpose";
 
   useEffect(() => {
@@ -251,13 +254,18 @@ function ContentStudioContent() {
 
   const handleRepurpose = async (contentId: string) => {
     if (!businessId) return;
+    if (selectedPlatforms.length === 0) {
+      setError("Select at least one platform to repurpose.");
+      return;
+    }
     try {
       setSubmitting(true);
       setError("");
       await repurposeBusinessContent(
         businessId,
         contentId,
-        [...PLATFORM_OPTIONS],
+        selectedPlatforms,
+        selectedAspectRatio,
       );
       setRepurposeNotice("Repurposing started. We’ll surface new outputs automatically.");
       await waitForRepurposingCompletion(businessId, contentId);
@@ -499,13 +507,15 @@ function ContentStudioContent() {
   if (selectedInput && activeTab === "repurpose") {
     return (
       <div className="max-w-6xl mx-auto px-4 py-8">
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => setSelectedInputId(null)}
-          className="mb-6 flex items-center gap-2 text-blue-600 hover:text-blue-700"
+          className="mb-4"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Content Inputs
-        </button>
+          Back to Inputs
+        </Button>
 
         {repurposeNotice && (
           <Card className="mb-6 border-blue-200 dark:border-blue-500/30">
@@ -513,6 +523,7 @@ function ContentStudioContent() {
               <p className="text-blue-700 dark:text-blue-300">{repurposeNotice}</p>
               <Button
                 variant="primary"
+                size="sm"
                 onClick={() => outputsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
               >
                 View outputs
@@ -552,6 +563,48 @@ function ContentStudioContent() {
 
             <div ref={outputsRef}>
               <h3 className="text-lg font-semibold mb-3">Repurposed Outputs</h3>
+              <div className="mb-4 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                <p className="text-xs text-gray-500 mb-2">Target Platforms</p>
+                <div className="flex flex-wrap gap-2">
+                  {PLATFORM_OPTIONS.map((platform) => {
+                    const active = selectedPlatforms.includes(platform);
+                    return (
+                      <Button
+                        key={platform}
+                        variant={active ? "primary" : "outline"}
+                        size="sm"
+                        onClick={() =>
+                          setSelectedPlatforms((prev) =>
+                            prev.includes(platform)
+                              ? prev.filter((p) => p !== platform)
+                              : [...prev, platform],
+                          )
+                        }
+                      >
+                        {platform}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  Repurpose runs for selected platforms only.
+                </p>
+                <div className="mt-3">
+                  <p className="text-xs text-gray-500 mb-2">Video Aspect Ratio</p>
+                  <div className="flex flex-wrap gap-2">
+                    {ASPECT_RATIO_OPTIONS.map((ratio) => (
+                      <Button
+                        key={ratio}
+                        variant={selectedAspectRatio === ratio ? "primary" : "outline"}
+                        size="sm"
+                        onClick={() => setSelectedAspectRatio(ratio)}
+                      >
+                        {ratio}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
               {selectedRepurposed.length === 0 ? (
                 <p className="text-gray-500 mb-4">
                   {refreshingOutputs
@@ -585,6 +638,14 @@ function ContentStudioContent() {
                       metadata?.cutTimestamps && typeof metadata.cutTimestamps === "object"
                         ? metadata.cutTimestamps
                         : null;
+                    const sourceSnapshot =
+                      (selectedInput.content || "").trim() ||
+                      (selectedInput.url ? `Source URL: ${selectedInput.url}` : "");
+                    const sourceSummary =
+                      typeof metadata?.summary === "string" && metadata.summary.trim().length > 0
+                        ? metadata.summary.trim()
+                        : sourceSnapshot.slice(0, 240);
+                    const isYoutubeAsset = !!item.assetUrl && /youtube\.com|youtu\.be/i.test(item.assetUrl);
 
                     return (
                       <Card key={item.id}>
@@ -611,11 +672,42 @@ function ContentStudioContent() {
                             <span>Select for bulk schedule</span>
                           </div>
                           {item.assetUrl && (
-                            <video className="w-full rounded-lg" controls>
-                              <source src={item.assetUrl} type="video/mp4" />
-                              Your browser does not support the video tag.
-                            </video>
+                            <div className="space-y-2">
+                              {isYoutubeAsset ? (
+                                <iframe
+                                  src={item.assetUrl.replace("watch?v=", "embed/")}
+                                  className="w-full rounded-lg aspect-video"
+                                  title={`${item.platform} preview`}
+                                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                  allowFullScreen
+                                />
+                              ) : (
+                                <video
+                                  key={item.assetUrl}
+                                  src={item.assetUrl}
+                                  className="w-full rounded-lg bg-black"
+                                  controls
+                                  playsInline
+                                  preload="metadata"
+                                />
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.open(item.assetUrl, "_blank", "noopener,noreferrer")}
+                              >
+                                Open Video
+                              </Button>
+                            </div>
                           )}
+                          <div className="rounded border border-gray-200 dark:border-gray-700 p-2">
+                            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                              Source Context
+                            </p>
+                            <p className="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
+                              {sourceSummary || "No source context available."}
+                            </p>
+                          </div>
                           <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
                             {item.content}
                           </p>
@@ -703,10 +795,11 @@ function ContentStudioContent() {
 
             <Button
               variant="primary"
+              size="sm"
               onClick={() => handleRepurpose(selectedInput.id)}
               disabled={submitting}
             >
-              {submitting ? "Generating..." : "Repurpose Content"}
+              {submitting ? "Generating..." : "Repurpose for Selected Platforms"}
             </Button>
           </CardContent>
         </Card>
@@ -901,33 +994,47 @@ function ContentStudioContent() {
 
       {activeTab === "repurpose" && (
         <>
-          <div className="flex flex-wrap gap-2 mb-6">
-            <Button
-              variant="primary"
-              onClick={() => {
-                setDraftType("video");
-                setDraftSource("file");
-                setShowNewForm(true);
-              }}
-            >
-              <Upload className="w-5 h-5" />
-              Upload Video
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setDraftType("video");
-                setDraftSource("url");
-                setShowNewForm(true);
-              }}
-            >
-              <Plus className="w-5 h-5" />
-              Paste Video URL
-            </Button>
-            <Button variant="ghost" onClick={() => setShowNewForm((v) => !v)}>
-              <Plus className="w-5 h-5" />
-              New Content Input
-            </Button>
+          <div className="mb-5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="text-sm text-gray-600 dark:text-gray-300">
+                Add one input, then repurpose it into platform outputs.
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={draftType}
+                  onChange={(e) => setDraftType(e.target.value as InputType)}
+                  className="px-2 py-1.5 text-xs border border-gray-300 rounded-lg dark:bg-gray-900 dark:border-gray-600"
+                >
+                  <option value="video">Video</option>
+                  <option value="audio">Audio</option>
+                  <option value="blog_url">Blog URL</option>
+                  <option value="text">Text</option>
+                </select>
+                {(draftType === "video" || draftType === "audio") && (
+                  <select
+                    value={draftSource}
+                    onChange={(e) => setDraftSource(e.target.value as "url" | "file")}
+                    className="px-2 py-1.5 text-xs border border-gray-300 rounded-lg dark:bg-gray-900 dark:border-gray-600"
+                  >
+                    <option value="url">URL</option>
+                    <option value="file">Upload</option>
+                  </select>
+                )}
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setShowNewForm(true)}
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Content Input
+                </Button>
+                {showNewForm && (
+                  <Button variant="outline" size="sm" onClick={() => setShowNewForm(false)}>
+                    Close
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -962,13 +1069,13 @@ function ContentStudioContent() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {contentInputs.map((input) => {
             const outputCount = repurposedItems.filter(
               (item) => item.contentInputId === input.id,
             ).length;
             return (
-              <Card key={input.id} className="cursor-pointer hover:shadow-lg transition-shadow">
+              <Card key={input.id} className="hover:shadow-md transition-shadow">
                 <CardHeader>
                   <div className="flex justify-between items-start gap-2">
                     <h3 className="font-semibold text-gray-900 dark:text-white truncate">
@@ -982,24 +1089,14 @@ function ContentStudioContent() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm text-gray-500">{outputCount} outputs</span>
+                    <span className="text-xs text-gray-500">{outputCount} outputs</span>
                     <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        className="text-blue-600 hover:text-blue-700 font-semibold text-sm"
-                        onClick={() => setSelectedInputId(input.id)}
-                      >
-                        View
-                      </button>
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRepurpose(input.id);
-                        }}
-                        disabled={submitting || input.status === "processing"}
+                        onClick={() => setSelectedInputId(input.id)}
                       >
-                        Repurpose
+                        Open
                       </Button>
                       <Button
                         variant="outline"
@@ -1131,6 +1228,7 @@ function NewContentInputForm({
   const [source, setSource] = useState<"url" | "file">(initialSource || "url");
   const [file, setFile] = useState<File | undefined>(undefined);
   const [touched, setTouched] = useState(false);
+  const [urlError, setUrlError] = useState("");
 
   useEffect(() => {
     if (touched) return;
@@ -1142,13 +1240,32 @@ function NewContentInputForm({
   const canUploadFile = type === "video" || type === "audio";
   const useFileUpload = !isTextType && canUploadFile && source === "file";
 
+  const normalizePublicUrl = (raw: string): string => {
+    const trimmed = raw.trim();
+    if (!trimmed) return "";
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return `https://${trimmed}`;
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setUrlError("");
+    const normalizedUrl = useFileUpload ? "" : normalizePublicUrl(url);
+    if (!isTextType && !useFileUpload) {
+      try {
+        // Ensure URL is parseable before submitting.
+        // This supports inputs like "youtube.com/watch?v=..." by auto-prefixing https://.
+        new URL(normalizedUrl);
+      } catch {
+        setUrlError("Please provide a valid public URL.");
+        return;
+      }
+    }
     await onSubmit({
       type,
       title,
       content: content.trim(),
-      url: url.trim(),
+      url: normalizedUrl,
       file,
     });
 
@@ -1238,13 +1355,20 @@ function NewContentInputForm({
             <div>
               <label className="block text-sm font-medium mb-2">Cloud/Public URL</label>
               <input
-                type="url"
+                type="text"
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://..."
+                onChange={(e) => {
+                  setUrl(e.target.value);
+                  if (urlError) setUrlError("");
+                }}
+                placeholder="youtube.com/watch?v=... or https://..."
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg dark:bg-gray-800 dark:border-gray-600"
                 required
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Paste any public link. We auto-add <code>https://</code> if missing.
+              </p>
+              {urlError && <p className="text-xs text-red-600 mt-1">{urlError}</p>}
             </div>
           )}
         </div>

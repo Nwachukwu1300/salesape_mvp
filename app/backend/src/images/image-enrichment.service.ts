@@ -25,6 +25,8 @@ export interface ImageEnrichmentResult {
   count: number;
 }
 
+type RankedImage = { index: number; score: number };
+
 // Unsplash collection IDs for different categories
 const UNSPLASH_COLLECTIONS: Record<string, string> = {
   restaurant: 'food-drink',
@@ -246,6 +248,99 @@ async function validateImageUrl(url: string): Promise<boolean> {
   }
 }
 
+function parseRankedImages(text: string): RankedImage[] {
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return [];
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    const ranked = Array.isArray(parsed?.ranked) ? parsed.ranked : [];
+    return ranked
+      .map((r: any) => ({
+        index: Number(r?.index),
+        score: Number(r?.score),
+      }))
+      .filter((r: RankedImage) => Number.isFinite(r.index) && Number.isFinite(r.score));
+  } catch {
+    return [];
+  }
+}
+
+async function scoreImagesWithAI(
+  candidates: string[],
+  input: ImageEnrichmentInput
+): Promise<string[]> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey || candidates.length < 2) return candidates;
+
+  const capped = candidates.slice(0, 8);
+  const context = [
+    `Business Name: ${input.businessName}`,
+    `Category: ${input.category}`,
+    `SEO Keywords: ${input.seoKeywords.join(', ') || 'none'}`,
+  ].join('\n');
+
+  const promptLines = [
+    'Rank the candidate website images by business relevance.',
+    'Focus on semantic fit to the business profile, not aesthetics alone.',
+    'Return strict JSON only: {"ranked":[{"index":0,"score":0}]}',
+    'Score range is 0-100.',
+    context,
+    'Candidates:',
+    ...capped.map((url, idx) => `${idx}: ${url}`),
+  ];
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_IMAGE_SCORING_MODEL || 'gpt-4o-mini',
+        temperature: 0.1,
+        max_tokens: 500,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an image relevance scoring engine for business website enrichment.',
+          },
+          {
+            role: 'user',
+            content: promptLines.join('\n'),
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      return candidates;
+    }
+
+    const data: any = await response.json();
+    const text = String(data?.choices?.[0]?.message?.content || '');
+    const ranked = parseRankedImages(text);
+    if (ranked.length === 0) return candidates;
+
+    const scoreMap = new Map<number, number>();
+    for (const row of ranked) {
+      if (row.index >= 0 && row.index < capped.length) {
+        scoreMap.set(row.index, row.score);
+      }
+    }
+
+    const ordered = capped
+      .map((url, idx) => ({ url, idx, score: scoreMap.get(idx) ?? -1 }))
+      .sort((a, b) => b.score - a.score)
+      .map((row) => row.url);
+
+    const remainder = candidates.filter((url) => !ordered.includes(url));
+    return [...ordered, ...remainder];
+  } catch {
+    return candidates;
+  }
+}
+
 /**
  * Main image enrichment function
  */
@@ -300,6 +395,9 @@ export async function enrichImages(input: ImageEnrichmentInput): Promise<ImageEn
 
   // Deduplicate images
   images = [...new Set(images)];
+
+  // AI-driven relevance scoring (business profile to image matching).
+  images = await scoreImagesWithAI(images, input);
 
   // Ensure minimum 3 images
   const defaultFallbacks = FALLBACK_IMAGES.default || [];

@@ -561,6 +561,7 @@ async function processRepurposingData(jobData: RepurposingJob, jobId?: string) {
     tone,
     contentInputId,
     platforms = [],
+    aspectRatio,
     businessName,
     businessContext,
   } = jobData;
@@ -651,6 +652,7 @@ async function processRepurposingData(jobData: RepurposingJob, jobId?: string) {
                 startSeconds: cut.start,
                 durationSeconds: cut.duration,
                 platform,
+                ...(aspectRatio ? { aspectRatio } : {}),
               });
               const buffer = fs.readFileSync(rendered.outputPath);
               const fileName = `repurposing/${contentInputId}/${platform}-${variantIndex + 1}-${Date.now()}.mp4`;
@@ -699,6 +701,7 @@ async function processRepurposingData(jobData: RepurposingJob, jobId?: string) {
               bRollGuide: buildBRollGuide(keyMoments),
               onScreenText: buildOnScreenText(keyMoments),
               cutTimestamps: cut,
+              aspectRatio: aspectRatio || 'platform-default',
               hook,
               duration,
               variantIndex: variantIndex + 1,

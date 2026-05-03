@@ -12,6 +12,7 @@ module.exports = {
     '!src/index.ts',
   ],
   coverageDirectory: 'coverage',
+  cacheDirectory: '<rootDir>/.jest-cache',
   coverageReporters: ['text', 'lcov', 'html'],
   coveragePathIgnorePatterns: [
     '/node_modules/',
