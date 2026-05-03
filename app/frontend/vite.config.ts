@@ -51,6 +51,55 @@ export default defineConfig({
   build: {
     target: "esnext",
     outDir: "build",
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalized = id.replace(/\\/g, "/");
+          if (!normalized.includes("/node_modules/")) return undefined;
+
+          if (
+            normalized.includes("/react/") ||
+            normalized.includes("/react-dom/") ||
+            normalized.includes("/scheduler/")
+          ) {
+            return "vendor-react";
+          }
+
+          if (normalized.includes("/react-router")) {
+            return "vendor-router";
+          }
+
+          if (normalized.includes("/livekit-client/")) {
+            return "vendor-livekit";
+          }
+
+          if (normalized.includes("/lucide-react/")) {
+            return "vendor-icons";
+          }
+
+          if (
+            normalized.includes("/@radix-ui/") ||
+            normalized.includes("/sonner/") ||
+            normalized.includes("/framer-motion/") ||
+            normalized.includes("/class-variance-authority/") ||
+            normalized.includes("/clsx/") ||
+            normalized.includes("/tailwind-merge/")
+          ) {
+            return "vendor-ui";
+          }
+
+          if (
+            normalized.includes("/axios/") ||
+            normalized.includes("/@stripe/") ||
+            normalized.includes("/zod/")
+          ) {
+            return "vendor-data";
+          }
+
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     host: true,

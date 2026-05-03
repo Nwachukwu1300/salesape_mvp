@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Room, RoomEvent, RemoteTrack, Track } from "livekit-client";
+import type { RemoteTrack, Room } from "livekit-client";
 import {
   Send,
   ArrowLeft,
@@ -199,7 +199,7 @@ export const ConversationQuestion: React.FC = () => {
 
   const attachBeyondTrack = (track: RemoteTrack) => {
     const element = track.attach();
-    if (track.kind === Track.Kind.Video) {
+    if (track.kind === "video") {
       element.classList.add("h-full", "w-full", "object-cover");
       if (beyondVideoHostRef.current) {
         beyondVideoHostRef.current.innerHTML = "";
@@ -208,7 +208,7 @@ export const ConversationQuestion: React.FC = () => {
       return;
     }
 
-    if (track.kind === Track.Kind.Audio && beyondAudioHostRef.current) {
+    if (track.kind === "audio" && beyondAudioHostRef.current) {
       beyondAudioHostRef.current.innerHTML = "";
       beyondAudioHostRef.current.appendChild(element);
     }
@@ -258,6 +258,7 @@ export const ConversationQuestion: React.FC = () => {
 
       await disconnectBeyondSession();
 
+      const { Room, RoomEvent } = await import("livekit-client");
       const room = new Room();
       room.on(RoomEvent.TrackSubscribed, (track) => {
         attachBeyondTrack(track as RemoteTrack);
