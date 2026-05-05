@@ -36,6 +36,8 @@ import type { WebsiteGenerationJobData } from './queues/website.queue.js';
 import authRouter from './routes/auth.js';
 import apeChatRouter from './routes/apeChat.js';
 import settingsRouter from './routes/settings.js';
+import { createHealthRouter } from './routes/health.js';
+import { createTtsRouter } from './routes/tts.js';
 import supabaseServer from './lib/supabase.server.js';
 
 // Import Phase 2B services
@@ -247,6 +249,7 @@ app.use(globalLimiter); // Global rate limiting
 
 // Register auth routes
 app.use(authRouter);
+app.use(createHealthRouter(prisma));
 
 // Start website generation worker (if Redis available) — ensure Redis is ready first
 async function initWorkers() {
@@ -420,59 +423,7 @@ const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunc
 // Protected API routers
 app.use('/api/ape', authenticateToken, apeChatRouter);
 app.use('/api/settings', authenticateToken, settingsRouter);
-
-// OpenAI TTS proxy (streaming)
-app.post('/api/tts', authenticateToken, async (req: AuthRequest, res: Response) => {
-  try {
-    const text = String(req.body?.text || '').trim();
-    if (!text) {
-      return res.status(400).json({ error: 'Text is required for TTS' });
-    }
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: 'OPENAI_API_KEY missing' });
-    }
-
-    const voice = String(req.body?.voice || 'nova');
-    const model = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
-
-    const upstream = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        voice,
-        input: text,
-        response_format: 'mp3',
-      }),
-    });
-
-    if (!upstream.ok) {
-      const errText = await upstream.text();
-      return res.status(upstream.status).json({
-        error: 'OpenAI TTS request failed',
-        details: errText,
-      });
-    }
-
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Transfer-Encoding', 'chunked');
-
-    const body = (upstream as any).body;
-    if (!body || typeof body.pipe !== 'function') {
-      const buffer = await upstream.arrayBuffer();
-      return res.status(200).send(Buffer.from(buffer));
-    }
-
-    body.pipe(res);
-  } catch (err) {
-    logger.error('TTS proxy error', { error: String(err) });
-    res.status(500).json({ error: 'Failed to generate TTS audio' });
-  }
-});
+app.use('/api', createTtsRouter(authenticateToken));
 
 app.get('/api/beyond/config', authenticateToken, async (_req: AuthRequest, res: Response) => {
   try {
@@ -1054,18 +1005,6 @@ ${JSON.stringify(recentMessages, null, 2)}
     return extracted;
   }
 }
-
-// Lightweight health endpoint for readiness checks
-app.get('/health', async (_req, res) => {
-  try {
-    // quick DB check
-    await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', db: 'connected' });
-  } catch (err) {
-    res.status(503).json({ status: 'error', db: 'disconnected' });
-  }
-});
-
 
 // Get monthly usage (SEO/free audits) for a business (returns counts for current month)
 app.get('/businesses/:businessId/usage', authenticateToken, async (req: AuthRequest, res: Response) => {
@@ -3016,11 +2955,6 @@ async function isTimeSlotAvailable(businessId: string, date: string, time: strin
     return slotTime >= startTime && slotTime < endTime;
   });
 }
-
-// --- Health Check ---
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({ ok: true });
-});
 
 // --- Authentication Endpoints ---
 

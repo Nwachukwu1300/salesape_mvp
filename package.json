@@ -1,6 +1,20 @@
 {
   "name": "salesape-monorepo",
   "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:backend": "npm --prefix app/backend run dev",
+    "dev:frontend": "npm --prefix app/frontend run dev",
+    "build": "npm run build:frontend",
+    "build:frontend": "npm --prefix app/frontend run build",
+    "typecheck:backend": "npm --prefix app/backend run typecheck",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "npm --prefix app/backend run test",
+    "test:frontend": "npm --prefix app/frontend run test -- --run",
+    "lint:frontend": "npm --prefix app/frontend run lint",
+    "prisma:generate": "npm --prefix app/backend exec -- prisma generate --schema prisma/schema.prisma",
+    "install:all": "npm install && npm --prefix app/backend install && npm --prefix app/frontend install"
+  },
   "devDependencies": {
     "@prisma/client": "^7.3.0",
     "@types/cheerio": "^0.22.35",

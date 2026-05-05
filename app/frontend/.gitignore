@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/test-results
 
 # build artifacts
 /out/

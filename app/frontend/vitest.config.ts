@@ -11,6 +11,7 @@ export default defineConfig({
     include: ['__tests__/**/*.{test,spec}.{ts,tsx}', 'src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['e2e/**', 'node_modules/**', 'build/**'],
     pool: 'threads',
+    fileParallelism: false,
   },
   resolve: {
     alias: {

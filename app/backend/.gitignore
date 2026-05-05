@@ -1,6 +1,9 @@
 node_modules
 .jest-cache
 .jest-tmp
+coverage
+*.log
+*.txt
 # Keep environment variables out of version control
 .env
 

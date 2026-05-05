@@ -1,9 +1,21 @@
-echo "node_modules/
+node_modules/
 .next/
+dist/
+build/
+coverage/
+test-results/
+
 .DS_Store
 *.log
+*.tsbuildinfo
+
 .env
 .env.local
-dist/
-build/" > .gitignore
-.claude
+.env.*.local
+
+.claude/
+.vscode/
+
+.npm-cache/
+.jest-cache/
+.jest-tmp/

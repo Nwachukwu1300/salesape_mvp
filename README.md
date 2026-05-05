@@ -1,380 +1,216 @@
 # SalesAPE MVP
 
-Turns small businesses into working online businesses automatically. Give us your Instagram or website URL, get a live website with lead capture and booking in minutes.
-
-## Purpose
-
-SalesAPE transforms solo and micro business owners into fully operational online businesses without the need for complex setup. Target users are local service businesses who currently get customers through Instagram or word of mouth but lack proper online infrastructure.
-
-## Core Concept
-
-1. User provides a website URL or Instagram URL
-2. Optionally describes their business in natural language
-3. System automatically understands the business
-4. Generates a live website with branding, lead capture, and booking
-5. Business starts receiving and managing leads immediately
-
-## What Gets Generated
-
-- Live website with business name and branding
-- Lead capture form
-- Booking calendar
-- Business email for lead notifications
-- Simple dashboard for lead management
-
-## User Flow
-
-```
-Landing → Input URL/Instagram → Answer questions → Preview website → Publish → Share link → Receive leads
-```
-
-Success signal: Working website + real leads within minutes.
-
-## Long-term Vision
-
-Voice or chat input builds and runs a business end-to-end with full automation.
-
----
+SalesAPE helps small service businesses turn an Instagram profile, website URL, or short conversation into a working online business presence: generated website, lead capture, bookings, content workflows, and follow-up automation.
 
 ## Tech Stack
 
-**Backend (Both Parties Focus)**
-- Node.js with Express 5.2.1
+Backend:
+
+- Node.js + Express
 - TypeScript
-- tsx for development
-- CORS enabled
-- In-memory storage (will migrate to database)
+- Prisma + PostgreSQL
+- Background jobs through Redis or pg-boss
+- Integrations for Supabase, OpenAI, email, SMS, calendar, publishing, and voice/avatar services
 
-**Frontend (Teammate Focus)**
-- Next.js 16.1.4 (App Router)
-- React 19.2.3
+Frontend:
+
+- Vite
+- React 19
 - TypeScript
-- Tailwind CSS 4
+- Tailwind CSS
+- React Router
 
-**Shared**
-- TypeScript types between frontend and backend
+## Repo Structure
 
----
-
-## Project Structure
-
-```
+```text
 salesape_mvp/
-├── app/
-│   ├── backend/                    # Backend API (Express + Prisma)
-│   │   ├── src/
-│   │   │   └── index.ts            # Main server with API endpoints
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   │
-│   ├── frontend/                   # Frontend app (Next.js)
-│   │   ├── pages/
-│   │   ├── components/
-│   │   ├── contexts/
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│
-├── figma-export/                   # Design system & UI components (Vite + React)
-│   ├── src/
-│   │   ├── components/
-│   │   ├── contexts/               # AuthContext, SubscriptionContext (wired to backend)
-│   │   ├── screens/
-│   │   ├── pages/
-│   │   ├── App.tsx
-│   │   └── main.tsx
-│   ├── package.json
-│   └── tsconfig.json
-│
-└── README.md
+  app/
+    backend/        Express API, Prisma, queues, workers, services
+    frontend/       Vite React app
+  docs/             Architecture and operating notes
+  .github/          CI workflow
 ```
 
----
+Important backend folders:
 
-## Getting Started
+- `app/backend/src/index.ts` - app bootstrap and legacy route registration
+- `app/backend/src/routes` - route modules
+- `app/backend/src/services` - business logic and integrations
+- `app/backend/src/queues` - queue definitions and queue provider setup
+- `app/backend/src/workers` - background workers
+- `app/backend/prisma/schema.prisma` - database schema
 
-### Prerequisites
+Important frontend folders:
 
-- Node.js v18 or higher
+- `app/frontend/src/routes.tsx` - app routes
+- `app/frontend/src/screens` - route screens
+- `app/frontend/src/components` - reusable UI
+- `app/frontend/src/lib/api.ts` - API client helpers
+
+## Prerequisites
+
+- Node.js 20 or newer
 - npm
+- PostgreSQL database URL for full backend features
+- Optional Redis for Redis-backed workers
 
-### Installation
+The repo includes `.nvmrc` with the expected local Node version.
 
-**Backend setup:**
-```bash
-cd app/backend
-npm install
+## Environment Files
+
+Do not commit real secrets.
+
+Use these files locally:
+
+- `app/backend/.env`
+- `app/backend/.env.local`
+- `app/frontend/.env.local`
+
+Use `.env.example` at the repo root as the reference list for common variables.
+
+Minimum backend variables for most local work:
+
+```env
+PORT=3001
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/salesape?schema=public
+JWT_SECRET=replace-with-a-long-random-secret
+ENCRYPTION_KEY=replace-with-32-byte-hex-key
+FRONTEND_URL=http://localhost:3002
+OPENAI_API_KEY=replace-with-openai-key
+REDIS_SKIP_WORKERS=true
 ```
 
-**Frontend setup:**
-```bash
-cd app/frontend
-npm install
+Minimum frontend variables:
+
+```env
+VITE_API_BASE_URL=http://localhost:3001
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=replace-with-anon-key
 ```
 
-### Running Locally
+## Install
 
-**Start backend** (port 3001):
-```bash
-cd app/backend
-npm run dev
-```
-
-**Start frontend** (port 3000):
-```bash
-cd app/frontend
-npm run dev
-```
-
-**Start figma-export design system** (port 3002):
-```bash
-cd figma-export
-npm run dev
-```
-
-Access the applications:
-- **Frontend (SalesAPE App)**: http://localhost:3000
-- **Backend API**: http://localhost:3001
-- **Design System (figma-export)**: http://localhost:3002
-
----
-
-## Backend API Reference
-
-Base URL: `http://localhost:3001`
-
-### Endpoints
-
-#### Health Check
-```
-GET /health
-```
-Returns: `{ ok: true }`
-
-#### Create Lead
-```
-POST /leads
-Content-Type: application/json
-
-{
-  "name": "string",           // required
-  "email": "string",          // required
-  "company": "string",        // optional
-  "message": "string"         // optional
-}
-```
-
-Returns (201):
-```json
-{
-  "id": "1737839234567",
-  "name": "John Doe",
-  "email": "john@example.com",
-  "company": "Acme Inc",
-  "message": "Interested in your product",
-  "createdAt": "2026-01-25T18:27:14.567Z"
-}
-```
-
-Error (400):
-```json
-{
-  "error": "Name and email are required"
-}
-```
-
-#### Get All Leads
-```
-GET /leads
-```
-
-Returns (200):
-```json
-[
-  {
-    "id": "1737839234567",
-    "name": "John Doe",
-    "email": "john@example.com",
-    "company": "Acme Inc",
-    "message": "Interested in your product",
-    "createdAt": "2026-01-25T18:27:14.567Z"
-  }
-]
-```
-
-### Testing the API
+From the repo root:
 
 ```bash
-# Create a lead
-curl -X POST http://localhost:3001/leads \
-  -H "Content-Type: application/json" \
-  -d '{"name":"John Doe","email":"john@example.com","message":"Test lead"}'
-
-# Get all leads
-curl http://localhost:3001/leads
+npm run install:all
 ```
 
----
+Or install apps separately:
 
-## Current Features
+```bash
+npm --prefix app/backend install
+npm --prefix app/frontend install
+```
 
-**MVP v0.4 (Current - Phase 5 Complete)**
-- Complete onboarding flow with URL/Instagram input
-- Web scraping of business information from URLs
-- AI-powered business analysis
-- Multiple website template selection
-- Custom branding (colors, fonts, logos)
-- Voice and chat input for business description
-- **User authentication with JWT** (email/password, Google OAuth, Apple Sign-In)
-- Lead capture form
-- Lead storage with Prisma ORM
-- Booking calendar backend
-- **Team collaboration** (invite members, manage roles)
-- **Advanced lead routing** (auto-assign by service/source)
-- **Payment integration** (subscription plans: Basic/Pro/Enterprise)
-- **Subscription usage tracking** (websites, leads, SEO audits)
-- **OAuth 2.0 Support**:
-  - 🔵 Google Sign-In
-  - 🍎 Apple Sign-In
-- Health check endpoint
-- CORS enabled for local development
-- **Figma-export Design System** (port 3002) - Complete UI component library
+Generate Prisma client after backend install:
 
-**Phase 4 Highlights - Now Complete!**
-- 🎤 **Voice Input**: Use Web Speech API to describe your business by voice
-- 💬 **Chat Input**: Text-based description with real-time form updates
-- 🎨 **Custom Branding**: 
-  - Primary and secondary color pickers
-  - Font family selector (sans-serif, serif, monospace)
-  - Custom logo URL upload
-- 📋 **Template Selection**: Choose from multiple pre-built website templates with visual preview
-- 👥 **Team Collaboration**: 
-  - Invite team members with different roles (admin, manager, member)
-  - Track invitation status and team member activity
-  - Email invitations for seamless onboarding
-- 🔀 **Advanced Lead Routing**: 
-  - Automatically assign leads to team members
-  - Route by service type or lead source
-  - Priority-based rule ordering
-  - Enable/disable rules dynamically
-- 💳 **Payment Integration**: 
-  - Three-tier subscription plans (Basic $29/mo, Pro $99/mo, Enterprise $299/mo)
-  - Simulated payment processing (Stripe-ready)
-  - Payment history and invoice tracking
-  - Automatic plan upgrades
+```bash
+npm run prisma:generate
+```
 
----
+## Run Locally
 
-## Development Workflow
+Start backend:
 
-### Backend Developer Responsibilities
+```bash
+npm run dev:backend
+```
 
-- API endpoint development
-- Business logic and data models
-- Database integration
-- Email/notification services
-- Website generation logic
-- Instagram/URL parsing
-- Authentication and authorization
+Backend runs on:
 
-### Frontend Developer Responsibilities
+```text
+http://localhost:3001
+```
 
-- Onboarding flow UI
-- Website preview component
-- Lead dashboard
-- Booking calendar UI
-- Form components
-- Responsive design
-- User authentication UI
+Start frontend in another terminal:
 
-### Shared Responsibilities
+```bash
+npm run dev:frontend
+```
 
-- TypeScript type definitions
-- API contract documentation
-- Integration testing
-- Deployment configuration
+Frontend runs on:
 
----
+```text
+http://localhost:3002
+```
 
-## Roadmap
+## Build And Test
 
-### Phase 1: MVP Foundation (Current)
-- [x] Basic backend API
-- [x] Simple lead form
-- [x] In-memory storage
-- [x] Lead dashboard view
-- [x] Basic email notifications
+Backend typecheck:
 
-### Phase 2: Core Features
- - [x] Database integration (PostgreSQL/SQLite)
- - [x] Instagram URL parsing
- - [x] Website URL scraping
- - [x] Business understanding (AI/NLP)
- - [x] Website template generation
- - [x] Booking calendar backend
- - [x] User authentication
+```bash
+npm run typecheck:backend
+```
 
-### Phase 3: Automation
- - [x] Automated website publishing
- - [x] Lead status automation
- - [x] Email sequences
- - [x] Calendar integration (Google/Outlook)
- - [x] SMS notifications
- - [x] Analytics tracking
+Backend tests:
 
+```bash
+npm run test:backend
+```
 
-### Phase 4: Scale
-- [x] Multiple website templates
-- [x] Custom branding options
-- [x] Voice/chat business setup
-- [x] Advanced lead routing
-- [x] Team collaboration features
-- [x] Payment integration
-### Phase 5: OAuth & Design System (Current)
-- [x] Google OAuth 2.0 sign-in
-- [x] Apple Sign-In support
-- [x] OAuth callback handling
-- [x] Figma-export design system (port 3002)
-- [x] AuthContext with social login
-- [x] Subscription usage metrics endpoint (`/businesses/:businessId/usage`)
-- [ ] Email verification flow
-- [ ] Advanced OAuth scopes (calendar, contacts)
----
+Frontend lint:
 
-## MVP Constraints
+```bash
+npm run lint:frontend
+```
 
-- One website template only
-- One lead form design
-- Basic email notification
-- No advanced automation
-- No payment processing
-- No multi-user support
+Frontend unit tests:
 
----
+```bash
+npm run test:frontend
+```
 
-## Technical Notes
+Frontend production build:
 
-- Backend uses `tsx watch` for hot reload during development
-- Frontend uses Next.js Fast Refresh
-- CORS configured for `localhost:3000` ↔ `localhost:3001`
-- Data stored in memory (array) - will migrate to Postgres
-- No environment variables required for local dev yet
+```bash
+npm run build:frontend
+```
 
----
+Default combined test command:
 
-## Contributing
+```bash
+npm test
+```
 
-### Branch Strategy
-- `main` - production-ready code
-- `dev` - integration branch
-- Feature branches: `backend/feature-name` or `frontend/feature-name`
+## CI
 
-### Commit Convention
-- `backend: description` for backend changes
-- `frontend: description` for frontend changes
-- `shared: description` for shared changes
+GitHub Actions runs on pushes and pull requests to `main`.
 
----
+The workflow:
 
-## Questions or Issues?
+1. Sets up Node 20
+2. Installs backend dependencies
+3. Installs frontend dependencies
+4. Generates Prisma client
+5. Typechecks backend
+6. Runs backend tests
+7. Builds frontend
 
-Contact the team or open an issue in the repository.
+Workflow file:
+
+```text
+.github/workflows/ci.yml
+```
+
+## Working On Backend Routes
+
+Prefer new route modules in `app/backend/src/routes`.
+
+Current direction:
+
+- Keep `src/index.ts` focused on app setup and route registration.
+- Put HTTP handlers in route modules.
+- Put reusable business logic in `src/services` or `src/utils`.
+
+Example route module:
+
+```text
+app/backend/src/routes/tts.ts
+```
+
+## More Docs
+
+- `docs/ARCHITECTURE.md` - system map
+- `CONTRIBUTING.md` - branch, PR, and test rules
+- `CODING_STANDARDS.md` - coding conventions
