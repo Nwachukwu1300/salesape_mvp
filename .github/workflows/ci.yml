@@ -9,24 +9,33 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/salesape?schema=public
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: |
+            app/backend/package-lock.json
+            app/frontend/package-lock.json
       - name: Install dependencies (backend)
-        working-directory: backend
+        working-directory: app/backend
         run: npm ci
       - name: Install dependencies (frontend)
-        working-directory: frontend
+        working-directory: app/frontend
         run: npm ci
+      - name: Generate Prisma client
+        working-directory: app/backend
+        run: npx prisma generate --schema prisma/schema.prisma
       - name: Typecheck backend
-        working-directory: backend
+        working-directory: app/backend
         run: npm run typecheck
       - name: Run backend tests
-        working-directory: backend
-        run: npm test || true
+        working-directory: app/backend
+        run: npm test
       - name: Build frontend
-        working-directory: frontend
+        working-directory: app/frontend
         run: npm run build
