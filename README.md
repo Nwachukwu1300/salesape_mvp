@@ -1,74 +1,71 @@
 # SalesAPE MVP
 
-SalesAPE helps small service businesses turn an Instagram profile, website URL, or short conversation into a working online business presence: generated website, lead capture, bookings, content workflows, and follow-up automation.
+SalesAPE helps small service businesses turn an Instagram profile, website URL, or guided conversation into a working online presence: generated website, lead capture, bookings, content workflows, and follow-up automation.
 
-## Tech Stack
+## Stack
 
 Backend:
 
-- Node.js + Express
-- TypeScript
-- Prisma + PostgreSQL
-- Background jobs through Redis or pg-boss
-- Integrations for Supabase, OpenAI, email, SMS, calendar, publishing, and voice/avatar services
+- Node.js, Express, TypeScript
+- Prisma with PostgreSQL
+- Queue provider abstraction: pg-boss for simple local/dev use, BullMQ/Redis for production-style workers
+- Integrations for Supabase, OpenAI, email, SMS, Google Calendar, publishing, voice/avatar services, and payments
 
 Frontend:
 
-- Vite
-- React 19
-- TypeScript
+- Vite, React 19, TypeScript
 - Tailwind CSS
 - React Router
+- Vitest for unit tests
 
-## Repo Structure
+## Repo Map
 
 ```text
 salesape_mvp/
   app/
-    backend/        Express API, Prisma, queues, workers, services
+    backend/        Express API, Prisma schema, queues, workers, services
     frontend/       Vite React app
-  docs/             Architecture and operating notes
+  docs/             Canonical project docs
   .github/          CI workflow
 ```
 
-Important backend folders:
+Important backend paths:
 
-- `app/backend/src/index.ts` - app bootstrap and legacy route registration
-- `app/backend/src/routes` - route modules
+- `app/backend/src/index.ts` - app bootstrap plus remaining legacy route groups
+- `app/backend/src/routes` - extracted route modules
 - `app/backend/src/services` - business logic and integrations
-- `app/backend/src/queues` - queue definitions and queue provider setup
+- `app/backend/src/queues` - queue provider and queue definitions
 - `app/backend/src/workers` - background workers
 - `app/backend/prisma/schema.prisma` - database schema
 
-Important frontend folders:
+Important frontend paths:
 
-- `app/frontend/src/routes.tsx` - app routes
+- `app/frontend/src/routes.tsx` - app route table
 - `app/frontend/src/screens` - route screens
 - `app/frontend/src/components` - reusable UI
-- `app/frontend/src/lib/api.ts` - API client helpers
+- `app/frontend/src/lib` - shared clients and helpers
+- `app/frontend/vite.config.ts` - dev server, proxy, and production chunk config
 
 ## Prerequisites
 
 - Node.js 20 or newer
 - npm
 - PostgreSQL database URL for full backend features
-- Optional Redis for Redis-backed workers
+- Optional Redis if `QUEUE_PROVIDER=bullmq`
 
-The repo includes `.nvmrc` with the expected local Node version.
+The repo includes `.nvmrc` for the expected local Node version.
 
-## Environment Files
+## Environment
 
 Do not commit real secrets.
 
-Use these files locally:
+Use `.env.example` as the reference, then copy values into:
 
 - `app/backend/.env`
 - `app/backend/.env.local`
 - `app/frontend/.env.local`
 
-Use `.env.example` at the repo root as the reference list for common variables.
-
-Minimum backend variables for most local work:
+Minimum backend values:
 
 ```env
 PORT=3001
@@ -80,10 +77,10 @@ OPENAI_API_KEY=replace-with-openai-key
 REDIS_SKIP_WORKERS=true
 ```
 
-Minimum frontend variables:
+Minimum frontend values:
 
 ```env
-VITE_API_BASE_URL=http://localhost:3001
+VITE_API_URL=http://localhost:3001
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=replace-with-anon-key
 ```
@@ -94,42 +91,30 @@ From the repo root:
 
 ```bash
 npm run install:all
-```
-
-Or install apps separately:
-
-```bash
-npm --prefix app/backend install
-npm --prefix app/frontend install
-```
-
-Generate Prisma client after backend install:
-
-```bash
 npm run prisma:generate
 ```
 
 ## Run Locally
 
-Start backend:
+Start the backend:
 
 ```bash
 npm run dev:backend
 ```
 
-Backend runs on:
+Backend default URL:
 
 ```text
 http://localhost:3001
 ```
 
-Start frontend in another terminal:
+Start the frontend in another terminal:
 
 ```bash
 npm run dev:frontend
 ```
 
-Frontend runs on:
+Frontend default URL:
 
 ```text
 http://localhost:3002
@@ -137,55 +122,24 @@ http://localhost:3002
 
 ## Build And Test
 
-Backend typecheck:
-
 ```bash
 npm run typecheck:backend
-```
-
-Backend tests:
-
-```bash
 npm run test:backend
-```
-
-Frontend lint:
-
-```bash
 npm run lint:frontend
-```
-
-Frontend unit tests:
-
-```bash
 npm run test:frontend
-```
-
-Frontend production build:
-
-```bash
 npm run build:frontend
 ```
 
-Default combined test command:
+Combined checks:
 
 ```bash
 npm test
+npm run build
 ```
 
 ## CI
 
 GitHub Actions runs on pushes and pull requests to `main`.
-
-The workflow:
-
-1. Sets up Node 20
-2. Installs backend dependencies
-3. Installs frontend dependencies
-4. Generates Prisma client
-5. Typechecks backend
-6. Runs backend tests
-7. Builds frontend
 
 Workflow file:
 
@@ -193,24 +147,24 @@ Workflow file:
 .github/workflows/ci.yml
 ```
 
-## Working On Backend Routes
+Current CI steps:
 
-Prefer new route modules in `app/backend/src/routes`.
+1. Setup Node 20
+2. Install backend dependencies
+3. Install frontend dependencies
+4. Generate Prisma client
+5. Typecheck backend
+6. Run backend tests
+7. Build frontend
 
-Current direction:
+## Docs
 
-- Keep `src/index.ts` focused on app setup and route registration.
-- Put HTTP handlers in route modules.
-- Put reusable business logic in `src/services` or `src/utils`.
+Canonical docs:
 
-Example route module:
-
-```text
-app/backend/src/routes/tts.ts
-```
-
-## More Docs
-
-- `docs/ARCHITECTURE.md` - system map
+- `docs/ARCHITECTURE.md` - system map and code ownership
+- `docs/API.md` - API surface and route ownership
+- `docs/OPERATIONS.md` - environment, queues, workers, Supabase, and troubleshooting
 - `CONTRIBUTING.md` - branch, PR, and test rules
 - `CODING_STANDARDS.md` - coding conventions
+
+Old implementation reports and duplicate API guides were removed. If a new doc is needed, keep it current and link it here.

@@ -14,8 +14,7 @@ This repo is an MVP, so keep changes small, easy to review, and backed by the ch
 2. Install dependencies:
 
 ```bash
-npm --prefix app/backend install
-npm --prefix app/frontend install
+npm run install:all
 ```
 
 3. Generate Prisma client after backend installs or schema changes:
@@ -47,10 +46,16 @@ npm run lint:frontend
 npm run build:frontend
 ```
 
-Frontend unit tests are available with:
+Also run frontend unit tests when touching frontend behavior:
 
 ```bash
 npm run test:frontend
+```
+
+Run all tests with:
+
+```bash
+npm test
 ```
 
 ## Pull Requests
@@ -59,16 +64,32 @@ npm run test:frontend
 - Mention any environment variables, migrations, or setup steps.
 - Include screenshots for visible frontend changes.
 - Keep unrelated refactors out of feature PRs.
+- Update docs in the same PR when behavior, setup, routes, env vars, or architecture changes.
 
 ## Backend Route Guidelines
 
 - Prefer route modules in `app/backend/src/routes`.
 - Keep HTTP parsing in routes and business logic in `services` or `utils`.
-- Avoid adding new large blocks to `src/index.ts`; use it as app setup and route registration.
+- Avoid adding new large blocks to `src/index.ts`; use it for app setup and route registration.
+- When touching a legacy route group in `src/index.ts`, consider extracting that group.
 
 ## Frontend Guidelines
 
-- Put screens in `app/frontend/src/screens`.
+- Put route screens in `app/frontend/src/screens`.
 - Put reusable UI in `app/frontend/src/components`.
-- Put API calls in `app/frontend/src/lib/api.ts`.
+- Put shared API/client helpers in `app/frontend/src/lib`.
 - Lazy-load heavy screens and SDKs when possible.
+- Keep Vite chunk splitting in `app/frontend/vite.config.ts` current when adding large dependencies.
+
+## Docs Guidelines
+
+Canonical docs live in:
+
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/API.md`
+- `docs/OPERATIONS.md`
+- `CONTRIBUTING.md`
+- `CODING_STANDARDS.md`
+
+Avoid new one-off "implementation complete" reports. If a feature needs documentation, add it to one of the canonical docs or create a durable guide under `docs/` and link it from `README.md`.

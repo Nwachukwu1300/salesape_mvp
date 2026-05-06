@@ -3106,7 +3106,7 @@ app.post('/auth/revoke', async (req: Request, res: Response) => {
 // Start Google OAuth flow
 app.get('/auth/google', (req: Request, res: Response) => {
   const clientId = process.env.GOOGLE_CLIENT_ID || '';
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/google/callback`;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:3002'}/auth/google/callback`;
   const state = crypto.randomBytes(12).toString('hex');
   const scope = encodeURIComponent('openid email profile');
   const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&access_type=offline&prompt=consent&state=${state}`;
@@ -3126,7 +3126,7 @@ app.get('/auth/google/callback', async (req: Request, res: Response) => {
         code,
         client_id: process.env.GOOGLE_CLIENT_ID || '',
         client_secret: process.env.GOOGLE_CLIENT_SECRET || '',
-        redirect_uri: process.env.GOOGLE_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/google/callback`,
+        redirect_uri: process.env.GOOGLE_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:3002'}/auth/google/callback`,
         grant_type: 'authorization_code',
       } as any) as any,
     });
@@ -3148,7 +3148,7 @@ app.get('/auth/google/callback', async (req: Request, res: Response) => {
 
     const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
 
-    const frontend = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    const frontend = (process.env.FRONTEND_URL || 'http://localhost:3002').replace(/\/+$/, '');
     return res.redirect(`${frontend}/auth/callback?token=${encodeURIComponent(token)}`);
   } catch (err) {
     console.error('Google OAuth callback error', err);
@@ -3159,7 +3159,7 @@ app.get('/auth/google/callback', async (req: Request, res: Response) => {
 // Start Apple Sign In flow (redirect)
 app.get('/auth/apple', (req: Request, res: Response) => {
   const clientId = process.env.APPLE_CLIENT_ID || '';
-  const redirectUri = process.env.APPLE_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/apple/callback`;
+  const redirectUri = process.env.APPLE_REDIRECT_URI || `${process.env.FRONTEND_URL || 'http://localhost:3002'}/auth/apple/callback`;
   if (!clientId) return res.status(501).json({ error: 'Apple Sign-In not configured' });
 
   const state = crypto.randomBytes(12).toString('hex');
@@ -3187,7 +3187,7 @@ app.post('/auth/apple/callback', express.urlencoded({ extended: true }), async (
     }
 
     const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-    const frontend = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    const frontend = (process.env.FRONTEND_URL || 'http://localhost:3002').replace(/\/+$/, '');
     return res.redirect(`${frontend}/auth/callback?token=${encodeURIComponent(token)}`);
   } catch (err) {
     console.error('Apple callback error', err);

@@ -1,52 +1,76 @@
 # Architecture
 
-SalesAPE is a Vite React frontend plus an Express TypeScript backend. The backend owns API routes, Prisma access, queues, workers, and external service integrations.
+SalesAPE is a Vite React frontend plus an Express TypeScript backend. The backend owns API routes, Prisma access, queues, workers, and integrations with external services.
 
-## Repo Map
+## High-Level Map
 
 ```text
-salesape_mvp/
-  app/
-    backend/        Express API, Prisma schema, workers, queues, services
-    frontend/       Vite React app
-  docs/             Architecture and operating notes
-  .github/          CI workflow
+Browser
+  |
+  v
+Vite React frontend (app/frontend, port 3002)
+  |
+  | HTTP / JSON
+  v
+Express backend (app/backend, port 3001)
+  |
+  +-- Prisma -> PostgreSQL
+  +-- Queue provider -> pg-boss or BullMQ/Redis
+  +-- Workers -> content, website, automation, publishing, analytics
+  +-- External services -> Supabase, OpenAI, email, SMS, Google, Stripe, Beyond/LiveKit
 ```
 
 ## Frontend
 
 Location: `app/frontend`
 
-- Framework: Vite + React 19 + TypeScript
+- Framework: Vite, React 19, TypeScript
 - Dev server: `http://localhost:3002`
 - Main entry: `src/main.tsx`
 - Router: `src/routes.tsx`
 - Screens: `src/screens`
 - Shared UI: `src/components`
-- API client: `src/lib/api.ts`
+- Shared clients/helpers: `src/lib`
+- Build output: `app/frontend/build`
 
-The frontend calls the backend on `http://localhost:3001` in development. Vite also proxies common API paths during local dev.
+The frontend uses Vite proxy rules for common API paths during local development. Code that needs an absolute API origin should use `VITE_API_URL`.
+
+Production chunks are configured in `app/frontend/vite.config.ts` so large dependencies such as React, React Router, LiveKit, Radix UI, icons, Stripe, Axios, and Zod are split into named vendor chunks.
 
 ## Backend
 
 Location: `app/backend`
 
-- Runtime: Node.js + Express + TypeScript
+- Runtime: Node.js, Express, TypeScript
 - Dev server: `http://localhost:3001`
 - App bootstrap: `src/index.ts`
-- Route modules: `src/routes`
+- Extracted route modules: `src/routes`
 - Business services: `src/services`
-- Queue setup: `src/queues`
+- Queue definitions and provider: `src/queues`
 - Background workers: `src/workers`
+- Prisma client wrapper: `src/prisma.ts`
 - Prisma schema: `prisma/schema.prisma`
 
-`src/index.ts` still contains legacy route groups. New work should move toward route modules in `src/routes` and services in `src/services`.
+`src/index.ts` still contains legacy route groups. New route work should go in `src/routes`, with reusable business logic in `src/services` or `src/utils`.
+
+Current extracted route modules:
+
+- `analytics-dashboard.ts`
+- `apeChat.ts`
+- `approval-workflow.ts`
+- `auth.ts`
+- `health.ts`
+- `memory.ts`
+- `scheduling.ts`
+- `settings.ts`
+- `team-permissions.ts`
+- `tts.ts`
 
 ## Data
 
-- Prisma models live in `app/backend/prisma/schema.prisma`.
-- The production datasource is PostgreSQL through `DATABASE_URL`.
-- Run Prisma client generation after dependency install or schema changes:
+The production datasource is PostgreSQL through `DATABASE_URL`.
+
+Run Prisma client generation after dependency install or schema changes:
 
 ```bash
 npm run prisma:generate
@@ -54,33 +78,46 @@ npm run prisma:generate
 
 ## Queues And Workers
 
-The backend supports background jobs for website generation, content ingestion, repurposing, publishing, reviews, and automation.
+Queue provider selection lives in `app/backend/src/queues/provider.ts`.
 
-Key folders:
+- `QUEUE_PROVIDER=pgboss` uses PostgreSQL-backed pg-boss.
+- `QUEUE_PROVIDER=bullmq` uses BullMQ with Redis.
+- If unset, local/development defaults to `pgboss`; production defaults to `bullmq`.
 
-- `app/backend/src/queues`
-- `app/backend/src/workers`
-
-Local development can skip Redis-backed workers with:
+Worker implementations live in `app/backend/src/workers`. Local development can skip worker startup with:
 
 ```env
 REDIS_SKIP_WORKERS=true
 ```
 
+Main worker domains:
+
+- Website generation
+- Lead automation
+- Content generation
+- Content ingestion
+- Content repurposing
+- Social distribution/posting
+- Review requests
+- Analytics polling
+- Account deletion
+
 ## External Services
 
-Common integrations include:
+Common integrations:
 
-- Supabase for auth/storage support
-- OpenAI for generation and TTS
-- Redis or pg-boss for background jobs
-- SendGrid for email
+- Supabase for storage/auth support
+- OpenAI for generation, embeddings, and TTS
+- Anthropic as an optional repurposing provider
+- Redis for BullMQ queues
+- SendGrid or SMTP for email
 - Twilio for SMS
-- Google APIs for calendar
-- Beyond Presence and LiveKit for avatar/voice sessions
+- Google APIs for auth/calendar/PageSpeed
 - Stripe for payments
+- Beyond Presence and LiveKit for avatar/voice sessions
+- Unsplash for generated website imagery
 
-Keep secrets in `app/backend/.env` or deployment environment variables. Do not commit real secrets.
+Keep secrets in local env files or deployment environment variables. Never commit real secrets.
 
 ## CI
 

@@ -1,146 +1,105 @@
 # Coding Standards
 
-This document outlines the coding standards and best practices for the SalesApe MVP project.
+These standards keep the MVP understandable for junior contributors and reduce accidental drift.
 
-## Code Formatting
+## General
 
-- **Prettier** configuration is in `.prettierrc` - run `npm run lint` to format code
-- **EditorConfig** settings are in `.editorconfig` for IDE compatibility
-- All source files must use:
-  - 2 spaces for indentation
-  - Unix line endings (LF)
-  - Trailing newline at end of files
+- Prefer existing patterns over new abstractions.
+- Keep changes scoped to the feature or bug being handled.
+- Do not commit generated build output, local caches, or secrets.
+- Keep source files readable and boring: clear names, small helpers, and simple control flow.
+- Add comments only when they explain non-obvious decisions.
 
-## TypeScript/JavaScript
+## Formatting
 
-### Imports Organization
+- Use the repo's `.editorconfig` and `.prettierrc`.
+- Keep TypeScript and Markdown plain ASCII unless the file already needs non-ASCII content.
+- Run relevant checks before pushing:
 
-```typescript
-// 1. External dependencies
-import { useState } from "react";
-import { Loader } from "lucide-react";
-
-// 2. Internal components/utilities
-import { Button } from "./components/Button";
-import { useCustomHook } from "./hooks/useCustomHook";
-
-// 3. Types
-import type { CustomType } from "./types";
+```bash
+npm run typecheck:backend
+npm run test:backend
+npm run lint:frontend
+npm run test:frontend
+npm run build:frontend
 ```
 
-### Naming Conventions
+## TypeScript
 
-- **Components**: PascalCase (e.g., `UserProfile`)
-- **Hooks**: camelCase with `use` prefix (e.g., `usePageTitle`)
-- **Functions**: camelCase (e.g., `fetchUserData`)
-- **Constants**: UPPER_SNAKE_CASE (e.g., `MAX_RETRIES`)
-- **Types/Interfaces**: PascalCase (e.g., `UserData`)
+- Prefer explicit types at module boundaries.
+- Avoid `any` in new code unless the surrounding integration is genuinely untyped.
+- Do not add `// @ts-nocheck` to new files.
+- Validate external input before using it.
+- Keep route request parsing in routes and business logic in services.
 
-### React Best Practices
+## Backend
 
-- Use functional components with hooks
-- Lazy load non-critical routes with `lazy()` and `Suspense`
-- Extract loading fallbacks into reusable components
-- Keep components small and focused
-- Use proper JSDoc comments for reusable components
+Backend code lives in `app/backend/src`.
 
-Example:
-```typescript
-/**
- * Loading fallback component for lazy-loaded routes
- */
-const LoadingFallback = () => (
-  <div className="p-6 flex items-center justify-center">
-    <Loader className="w-8 h-8 animate-spin" />
-  </div>
-);
+Use this layout:
+
+```text
+routes/       HTTP handlers and auth middleware composition
+services/     Business logic and external service orchestration
+queues/       Queue definitions and enqueue helpers
+workers/      Background processors
+utils/        Shared technical helpers
+lib/          Shared clients such as Supabase
+middleware/   Express middleware
 ```
 
-## File Organization
+Guidelines:
 
-```
-src/
-├── components/         # Reusable UI components
-├── contexts/          # React Context providers
-├── hooks/             # Custom React hooks
-├── layouts/           # Layout components
-├── lib/               # Utility libraries
-├── screens/           # Page/screen components
-├── services/          # API/service functions
-├── templates/         # Content templates
-├── types/             # TypeScript type definitions
-├── utils/             # Utility functions
-└── App.tsx            # Root component
-```
+- New HTTP routes should go in `src/routes`.
+- Keep `src/index.ts` focused on app setup and route registration.
+- Put reusable logic in `src/services` or `src/utils`.
+- Use Prisma through the existing Prisma helper/client patterns.
+- Use structured logging through `src/utils/logger.ts`.
+- Keep secrets in env vars, never in source.
 
-## Comments and Documentation
+## Frontend
 
-- Use JSDoc for public functions and components
-- Keep comments concise and relevant
-- Update comments when code changes
-- Remove commented-out code - use git history instead
+Frontend code lives in `app/frontend/src`.
 
-## Error Handling
+Use this layout:
 
-- Always handle errors gracefully
-- Use Error Boundary for React components
-- Provide meaningful error messages to users
-- Log errors for debugging (production-safe)
-
-## Testing
-
-- Write unit tests for utilities and services
-- Write integration tests for critical flows
-- Aim for >80% code coverage
-- Test error cases, not just happy paths
-
-## Dependencies
-
-- Minimize external dependencies
-- Keep dependencies up to date
-- Document why a dependency is needed
-- Review dependency sizes (use `npm ls` for audits)
-
-## Performance
-
-- Lazy load non-critical components
-- Memoize expensive computations
-- Use React DevTools Profiler to identify bottlenecks
-- Avoid unnecessary re-renders
-- Optimize images and assets
-
-## Code Review Checklist
-
-- [ ] Code follows formatting standards
-- [ ] Types are properly defined
-- [ ] No console.logs in production code
-- [ ] Error handling is in place
-- [ ] Components are reusable/composable
-- [ ] Comments are clear and helpful
-- [ ] No unused imports or variables
-- [ ] Tests are passing (if applicable)
-
-## Git Commit Messages
-
-Use conventional commits:
-```
-feat: add new feature
-fix: fix a bug
-docs: update documentation
-style: formatting changes
-refactor: code restructuring
-test: add/update tests
-chore: dependency updates
+```text
+screens/      Route-level screens
+components/   Reusable UI components
+contexts/     React context providers
+hooks/        Reusable hooks
+lib/          API clients and shared helpers
 ```
 
-Example: `feat: add lazy loading to dashboard routes`
+Guidelines:
 
-## Backend Standards
+- Prefer existing UI components before creating new ones.
+- Keep screen components focused on orchestration and layout.
+- Put API calls and shared client logic in `src/lib`.
+- Use Vite environment variables with the `VITE_` prefix.
+- Avoid introducing large dependencies without checking production chunk output.
 
-For Node.js/Express backend:
-- Use TypeScript with strict mode
-- Organize routes, middleware, and services separately
-- Handle errors with try-catch and error middleware
-- Validate input on API routes
-- Use environment variables for configuration
-- Document API endpoints with comments
+## Tests
+
+- Backend: Jest through `npm run test:backend`.
+- Frontend: Vitest through `npm run test:frontend`.
+- Frontend test temp files are routed to `.tmp/vitest` by `app/frontend/scripts/run-vitest.mjs`.
+
+Add tests when:
+
+- A bug fix changes behavior.
+- A service or route has non-trivial branching.
+- Shared helpers or data transformations change.
+
+## Documentation
+
+Update docs when changing:
+
+- Install or run commands
+- Environment variables
+- API routes
+- Queue/worker behavior
+- Deployment or CI behavior
+- Repo structure
+
+Canonical docs are listed in `README.md`. Avoid stale implementation reports.
