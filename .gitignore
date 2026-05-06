@@ -19,3 +19,4 @@ test-results/
 .npm-cache/
 .jest-cache/
 .jest-tmp/
+.tmp/

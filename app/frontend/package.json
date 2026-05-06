@@ -7,7 +7,7 @@
         "build": "vite build",
         "start": "vite preview",
         "lint": "eslint",
-        "test": "vitest",
+        "test": "node ./scripts/run-vitest.mjs",
         "test:ui": "vitest --ui",
         "test:coverage": "vitest --coverage"
     },

@@ -1,14 +1,8 @@
 import { Router } from 'express';
-import type { NextFunction, Request, Response } from 'express';
+import type { Response } from 'express';
 import fetch from 'node-fetch';
 import { logger } from '../utils/logger.js';
-
-interface AuthRequest extends Request {
-  userId?: string;
-  email?: string;
-}
-
-type AuthMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => unknown;
+import type { AuthMiddleware, AuthRequest } from './types.js';
 
 export function createTtsRouter(authenticateToken: AuthMiddleware) {
   const router = Router();
